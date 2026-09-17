@@ -41,6 +41,28 @@ internal static partial class NativeMethods
         return result == IDYES;
     }
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetProcessDpiAwarenessContext(IntPtr value);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetProcessDPIAware();
+
+    // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (HANDLE)-4
+    private static readonly IntPtr PerMonitorV2 = new(-4);
+
+    /// <summary>
+    /// Prosesi Per-Monitor-V2 DPI-aware edir ki, miqyaslanmış (125%/150%)
+    /// ekranlarda tam fiziki çözünürlük tutulsun (yoxsa ekranın yalnız bir
+    /// hissəsi görünür). Ən başda, hər hansı tutmadan ƏVVƏL çağırılmalıdır.
+    /// </summary>
+    public static void EnableDpiAwareness()
+    {
+        try { if (SetProcessDpiAwarenessContext(PerMonitorV2)) return; } catch { }
+        try { SetProcessDPIAware(); } catch { } // köhnə Windows üçün ehtiyat
+    }
+
     /// <summary>Konsol pəncərəsini gizlədir (arxa planda işləmək üçün).</summary>
     public static void HideConsoleWindow()
     {

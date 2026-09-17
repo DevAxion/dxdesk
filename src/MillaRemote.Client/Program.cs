@@ -2,6 +2,9 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using MillaRemote.Client;
 
+// Miqyaslanmış ekranlarda tam çözünürlük üçün ƏN BAŞDA DPI-aware et.
+MillaRemote.Client.NativeMethods.EnableDpiAwareness();
+
 // ---- Konfiqurasiya ----
 var config = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
