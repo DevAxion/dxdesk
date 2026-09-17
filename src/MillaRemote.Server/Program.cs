@@ -11,7 +11,6 @@ var config = new ConfigurationBuilder()
     .Build();
 
 var relayUrl = config["Relay:Url"] ?? "http://localhost:5100/remotehub";
-var viewerPath = config["Viewer:Path"];
 var fallbackPort = int.TryParse(config["Stream:Port"], out var fp) && fp > 0 ? fp : 7000;
 
 var connection = new HubConnectionBuilder()
@@ -41,7 +40,7 @@ connection.On<ConnectionResponseMessage>("ConnectionResponse", response =>
         var target = !string.IsNullOrWhiteSpace(response.IpAddress) ? response.IpAddress! : response.Hostname;
         var port = response.StreamPort > 0 ? response.StreamPort : fallbackPort;
         Console.WriteLine($"  ✓ {response.Hostname} qəbul etdi. Ekran açılır ({target}:{port})...");
-        ViewerLauncher.Launch(target, port, viewerPath);
+        ViewerHost.Launch(target, port);
     }
     else
     {

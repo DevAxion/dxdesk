@@ -1,13 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>MillaRemote.Viewer</RootNamespace>
-    <AssemblyName>MillaRemote.Viewer</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
