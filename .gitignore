@@ -1,0 +1,9 @@
+bin/
+obj/
+publish/
+*.user
+.vs/
+
+# Generasiya olunmuş yayım paketləri (mənbədən build olunur)
+deploy/admin/
+deploy/vm-client/
