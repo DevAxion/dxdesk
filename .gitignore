@@ -7,3 +7,4 @@ publish/
 # Generasiya olunmuş yayım paketləri (mənbədən build olunur)
 deploy/admin/
 deploy/vm-client/
+deploy/dist-client/
