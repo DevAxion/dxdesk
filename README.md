@@ -25,8 +25,8 @@ MillaRemote isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
 |--------|-----|---------|
 | **MillaRemote.Relay**  | ASP.NET Core 9 SignalR hub (`/remotehub`) | Mərkəzi siqnal serveri (kəşf + icazə) |
 | **MillaRemote.Client** | Konsol (net9.0-windows, WinExe/səssiz) | User PC-lərinə GPO ilə yayılır; icazədən sonra ekran serveri |
-| **MillaRemote.Server** | Konsol (admin aləti) | Adminin (Sulxay) istifadə etdiyi menyu |
-| **MillaRemote.Viewer** | WinForms (net9.0-windows) | Uzaq ekranı göstərən + idarə edən pəncərə |
+| **MillaRemote.Server** | Konsol + WinForms (tək exe) | Adminin menyusu; Viewer-i öz içində açır |
+| **MillaRemote.Viewer** | Kitabxana (WinForms) | Uzaq ekran pəncərəsi (Server-ə daxildir, ayrıca exe deyil) |
 | **MillaRemote.Core**   | Kitabxana | Ekran tutma, kadr protokolu, stream server/receiver, input |
 | **MillaRemote.Host**   | Konsol (test) | Streaming/protokol testləri: `serve`/`selftest`/`inputtest`/`relaytest` |
 | **MillaRemote.CaptureProbe** | Konsol (test) | Ekran tutma testi |
@@ -89,13 +89,14 @@ zamanlanmış tapşırıq). Client-lərdə **7000 (stream) portu firewall-da aç
 
 ## 3. Admin (server) alətini istifadə etmək
 
-Admin maşınında **Server + Viewer** exe-ləri **yanaşı** olmalıdır (Server, Viewer-i
-işə salır). `appsettings.json` → `Relay:Url` relay-ə işarə etməlidir.
+Admin maşınında yalnız **tək fayl** lazımdır: `MillaRemote.Server.exe`
+(+ kiçik `appsettings.json`). Viewer onun içindədir. Tək-fayl yayım:
 
 ```bash
-cd src/MillaRemote.Server
-dotnet run
+dotnet publish src/MillaRemote.Server/MillaRemote.Server.csproj -c Release -r win-x64
 ```
+
+`appsettings.json` → `Relay:Url` Ubuntu relay-ə işarə etməlidir (məs. `http://10.30.2.11:5100/remotehub`).
 
 Menyu:
 
@@ -170,6 +171,14 @@ Ekran tam sabit olanda **heç nə göndərilmir**.
 - Nəticə: köhnə tam-kadr üsuluna nəzərən **~95%+ az bant**.
 
 Konfiqurasiya (Client `appsettings.json` → `Stream`): `Port`, `TargetFps`, `TileSize`.
+
+## Ekran tutma qeydləri
+
+- **DPI miqyaslama:** Client Per-Monitor-V2 DPI-aware-dir — 125%/150% miqyaslı
+  ekranlarda tam fiziki çözünürlük tutulur (əks halda yalnız ekranın bir hissəsi
+  görünərdi).
+- **Çoxlu monitor:** Hazırda yalnız **əsas monitor** tutulur. Bütün monitorların
+  tutulması gələcək təkmilləşdirmədir.
 
 ## Təhlükəsizlik və qalan işlər (hardening)
 
