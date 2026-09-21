@@ -8,10 +8,14 @@ namespace MillaRemote.Client;
 
 /// <summary>
 /// SYSTEM integrity-li agent üçün ekran yayımı + input yeritmə.
-/// Xüsusi (dedicated) thread-lərdə işləyir və hər addımda aktiv input desktop-a
-/// keçir (Default ↔ Secure/Winlogon), beləliklə "Run as administrator" edəndə
-/// çıxan UAC pəncərəsi də tutulur və idarə oluna bilir (admin parolu uzaqdan
-/// yazıla bilir). Bir sessiya = bir viewer; viewer ayrılanda qayıdır.
+///
+/// Masaüstü-izləmə: capture üçün hər aktiv masaüstünə (Default ↔ Secure/Winlogon)
+/// AYRICA təzə thread yaradılır (GDI vəziyyəti SetThreadDesktop-u bloklamasın deyə).
+/// Supervisor masaüstü dəyişimini izləyir və capture thread-ini yenidən yaradır.
+/// Beləliklə "Run as administrator" edəndə çıxan UAC pəncərəsi də tutulur və
+/// admin parolu uzaqdan yazıla bilir.
+///
+/// Bir sessiya = bir viewer; viewer ayrılanda qayıdır.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class AgentStreamer
@@ -33,25 +37,34 @@ public static class AgentStreamer
             using (client)
             {
                 client.NoDelay = true;
-                using var stream = client.GetStream();
+                var stream = client.GetStream();
                 var stop = new CancellationTokenSource();
 
-                var capture = new Thread(() => CaptureLoop(stream, targetFps, tileSize, stop, log))
-                {
-                    IsBackground = true,
-                    Name = "agent-capture",
-                };
                 var input = new Thread(() => InputLoop(stream, stop, log))
                 {
                     IsBackground = true,
                     Name = "agent-input",
                 };
-
-                capture.Start();
                 input.Start();
 
-                capture.Join(); // viewer ayrılanda bitir
-                stop.Cancel();
+                // Capture supervisor: masaüstü dəyişəndə təzə thread yaradır.
+                while (!stop.IsCancellationRequested)
+                {
+                    var capture = new Thread(() => CaptureOnCurrentDesktop(stream, targetFps, tileSize, stop, log))
+                    {
+                        IsBackground = true,
+                        Name = "agent-capture",
+                    };
+                    capture.Start();
+                    capture.Join();
+                    // Thread qayıtdı: ya stop (disconnect/xəta), ya masaüstü dəyişdi.
+                    // stop deyilsə, döngə təzə thread ilə yeni masaüstünü tutur.
+                    if (!stop.IsCancellationRequested)
+                    {
+                        Thread.Sleep(50); // təkrar-yaratmanı yüngülcə tənzimlə
+                    }
+                }
+
                 try { client.Close(); } catch { }
                 input.Join(1000);
             }
@@ -75,10 +88,18 @@ public static class AgentStreamer
         catch { return false; }
     }
 
-    private static void CaptureLoop(
+    /// <summary>
+    /// Təzə thread-də cari input desktop-a bağlanıb onu tutur. Masaüstü dəyişəndə
+    /// SAKİTCƏ qayıdır (supervisor təzə thread yaradacaq). Disconnect/xətada stop-u
+    /// ləğv edir.
+    /// </summary>
+    private static void CaptureOnCurrentDesktop(
         NetworkStream stream, int targetFps, int tileSize, CancellationTokenSource stop, Action<string> log)
     {
+        // Təzə thread-in İLK addımı: aktiv masaüstünə keç (GDI-dən əvvəl).
+        var desktop = DesktopControl.AttachToInputDesktop();
         var interval = TimeSpan.FromSeconds(1.0 / Math.Clamp(targetFps, 1, 60));
+
         try
         {
             using var encoder = new TileScreenEncoder(tileSize);
@@ -86,8 +107,11 @@ public static class AgentStreamer
             {
                 var start = DateTime.UtcNow;
 
-                // Aktiv masaüstünə keç (Default ↔ Secure Desktop / UAC).
-                DesktopControl.EnsureOnInputDesktop();
+                // Masaüstü dəyişibsə, bu thread-i bitir → supervisor təzəsini yaradır.
+                if (DesktopControl.CurrentInputDesktopName() != desktop)
+                {
+                    return;
+                }
 
                 var payload = encoder.NextFrame();
                 if (payload is not null)
@@ -104,20 +128,18 @@ public static class AgentStreamer
         }
         catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
         {
-            // Viewer ayrıldı — normal.
+            stop.Cancel(); // viewer ayrıldı
         }
         catch (Exception ex)
         {
             log($"Capture xətası: {ex.Message}");
-        }
-        finally
-        {
             stop.Cancel();
         }
     }
 
     private static void InputLoop(NetworkStream stream, CancellationTokenSource stop, Action<string> log)
     {
+        string? attached = DesktopControl.AttachToInputDesktop();
         try
         {
             var injector = new InputInjector();
@@ -128,7 +150,15 @@ public static class AgentStreamer
                 {
                     break;
                 }
-                DesktopControl.EnsureOnInputDesktop();
+
+                // Masaüstü dəyişibsə, input thread-ini yeni masaüstünə keçir
+                // (input thread-də GDI olmadığı üçün təkrar SetThreadDesktop işləyir).
+                var cur = DesktopControl.CurrentInputDesktopName();
+                if (cur != attached)
+                {
+                    attached = DesktopControl.AttachToInputDesktop();
+                }
+
                 try { injector.Inject(msg); } catch { /* tək mesaj xətası döngəni dayandırmasın */ }
             }
         }
@@ -146,7 +176,7 @@ public static class AgentStreamer
         }
     }
 
-    // --- Sinxron kadr protokolu (FrameProtocol ilə eyni format: [4 bayt BE uzunluq][data]) ---
+    // --- Sinxron kadr protokolu ([4 bayt BE uzunluq][data]) ---
 
     private static void WriteFrame(Stream s, byte[] payload)
     {

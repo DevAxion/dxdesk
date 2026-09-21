@@ -6,11 +6,12 @@ namespace MillaRemote.Core;
 
 /// <summary>
 /// Cari "input desktop"-a (Default və ya Secure/Winlogon) keçidi idarə edir.
-/// SYSTEM integrity-li proses hər iki masaüstünə çata bilir; bu köməkçi capture/
-/// input thread-ini aktiv masaüstünə bağlayır ki, UAC (Secure Desktop) da tutulsun.
+/// SYSTEM integrity-li proses hər iki masaüstünə çata bilir.
 ///
-/// QEYD: SetThreadDesktop yalnız pəncərəsi/hook-u olmayan thread-də işləyir,
-/// ona görə bunu YALNIZ xüsusi (dedicated) capture/input thread-lərində çağırın.
+/// VACİB: SetThreadDesktop thread-də GDI obyekti/pəncərə olduqda uğursuz olur
+/// (error 170). Ona görə keçidi YALNIZ təzə (heç bir tutma etməmiş) thread-də,
+/// ən birinci addım kimi edin. Masaüstü dəyişəndə köhnə capture thread-i
+/// dayandırıb təzəsini yaratmaq lazımdır.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class DesktopControl
@@ -31,43 +32,42 @@ public static class DesktopControl
     private static extern bool GetUserObjectInformation(
         IntPtr hObj, int nIndex, byte[]? pvInfo, uint nLength, out uint lpnLengthNeeded);
 
-    // Hər thread öz cari masaüstü handle-ını və adını saxlayır.
-    [ThreadStatic] private static IntPtr _current;
-    [ThreadStatic] private static string? _currentName;
-
     /// <summary>
-    /// Çağıran thread-i cari input desktop-a bağlayır (dəyişibsə). Best-effort:
-    /// alınmasa səssizcə davam edir (normal masaüstündə qalır).
+    /// Çağıran thread-i cari input desktop-a bağlayır və onun adını qaytarır.
+    /// Təzə thread-də, hər hansı GDI çağırışından ƏVVƏL çağırılmalıdır.
+    /// Uğursuz olsa null qaytarır.
     /// </summary>
-    public static void EnsureOnInputDesktop()
+    public static string? AttachToInputDesktop()
     {
         var h = OpenInputDesktop(0, true, GENERIC_ALL);
         if (h == IntPtr.Zero)
         {
-            return;
+            return null;
         }
 
         var name = GetDesktopName(h);
-        if (name is not null && name == _currentName)
-        {
-            CloseDesktop(h); // Eyni masaüstü — təzə handle-ı bağla.
-            return;
-        }
-
-        if (SetThreadDesktop(h))
-        {
-            var old = _current;
-            _current = h;
-            _currentName = name;
-            if (old != IntPtr.Zero)
-            {
-                CloseDesktop(old);
-            }
-        }
-        else
+        if (!SetThreadDesktop(h))
         {
             CloseDesktop(h);
+            return null;
         }
+
+        // Handle-ı bağlamırıq: thread bu masaüstünə bağlıdır. Thread bitəndə
+        // sistem təmizləyir (masaüstü dəyişimi seyrək olduğu üçün problem deyil).
+        return name;
+    }
+
+    /// <summary>Cari input desktop-un adını qaytarır (keçid etmədən).</summary>
+    public static string? CurrentInputDesktopName()
+    {
+        var h = OpenInputDesktop(0, true, GENERIC_ALL);
+        if (h == IntPtr.Zero)
+        {
+            return null;
+        }
+        var name = GetDesktopName(h);
+        CloseDesktop(h);
+        return name;
     }
 
     private static string? GetDesktopName(IntPtr hDesktop)
