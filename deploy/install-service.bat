@@ -9,9 +9,10 @@ REM  Administrator kimi ishe salin (sag klik -> Run as administrator).
 REM  Xidmet SYSTEM oldugu ucun UAC-siz idare/qurashdirma mumkun olur.
 REM ============================================================
 
-REM --- Menbe = bu skriptin folderi (sondaki backslash-i cixaririq) ---
+REM --- Menbe: evvel bu skriptin folderi, tapilmasa paylasim (GPO/SYSVOL ucun) ---
 set "SRC=%~dp0"
 if "%SRC:~-1%"=="\" set "SRC=%SRC:~0,-1%"
+if not exist "%SRC%\MillaRemote.Service.exe" set "SRC=\\milladc01\software_deploy\dist-client"
 
 set "DEST=%ProgramData%\MillaRemote"
 set "LOG=%DEST%\install.log"
