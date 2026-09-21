@@ -9,3 +9,7 @@ deploy/admin/
 deploy/vm-client/
 deploy/dist-client/
 deploy/service-package/
+
+# Lokal sirlər — commit etmə
+.env
+**/.env
