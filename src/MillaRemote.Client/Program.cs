@@ -31,7 +31,18 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     var agentHost = args[2];
     var agentPort = int.TryParse(args[3], out var ap) && ap > 0 ? ap : streamPort;
 
+    // Agent fayl loqu (SYSTEM/səssiz olduğu üçün konsol görünmür).
+    var agentLogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "MillaRemote", "agent.log");
+    void AgentLog(string m)
+    {
+        try { File.AppendAllText(agentLogPath, $"[{DateTime.Now:HH:mm:ss}] {m}{Environment.NewLine}"); } catch { }
+    }
+    AgentLog($"--- Agent başladı. Identity={System.Security.Principal.WindowsIdentity.GetCurrent().Name}, host={agentHost}, port={agentPort} ---");
+
     var accepted = ShowRequestDialog();
+    AgentLog($"İcazə: {(accepted ? "QƏBUL" : "RƏDD")}");
 
     // Qəbul olunarsa, ekran serverini (masaüstü-izləyən agent) ayrıca thread-də
     // başladırıq ki, cavab göndərməzdən əvvəl port dinlənilsin.
@@ -40,7 +51,7 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     {
         var agentThread = new Thread(() =>
         {
-            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(30), Log); }
+            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(30), AgentLog); }
             finally { done.Set(); }
         })
         {
@@ -59,7 +70,7 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     }
     catch (Exception ex)
     {
-        Log($"Agent cavab xətası: {ex.Message}");
+        AgentLog($"Agent cavab xətası: {ex.Message}");
     }
     finally
     {

@@ -98,6 +98,7 @@ public static class AgentStreamer
     {
         // Təzə thread-in İLK addımı: aktiv masaüstünə keç (GDI-dən əvvəl).
         var desktop = DesktopControl.AttachToInputDesktop();
+        log($"capture: attach='{desktop ?? "(alınmadı)"}'");
         var interval = TimeSpan.FromSeconds(1.0 / Math.Clamp(targetFps, 1, 60));
 
         try
@@ -108,12 +109,26 @@ public static class AgentStreamer
                 var start = DateTime.UtcNow;
 
                 // Masaüstü dəyişibsə, bu thread-i bitir → supervisor təzəsini yaradır.
-                if (DesktopControl.CurrentInputDesktopName() != desktop)
+                var current = DesktopControl.CurrentInputDesktopName();
+                if (current != desktop)
                 {
+                    log($"capture: masaüstü dəyişdi '{desktop}' -> '{current}', yenilənir");
                     return;
                 }
 
-                var payload = encoder.NextFrame();
+                byte[]? payload;
+                try
+                {
+                    payload = encoder.NextFrame();
+                }
+                catch (Exception ex)
+                {
+                    // Bir kadrın tutulması alınmadı (məs. keçid anı) — SESSİYANI
+                    // ÖLDÜRMÜRÜK; bu thread-i bitirib supervisor-a təzədən başlatdırırıq.
+                    log($"capture: kadr xətası (davam) '{desktop}': {ex.Message}");
+                    return;
+                }
+
                 if (payload is not null)
                 {
                     WriteFrame(stream, payload);
@@ -128,18 +143,20 @@ public static class AgentStreamer
         }
         catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
         {
-            stop.Cancel(); // viewer ayrıldı
+            log("capture: viewer ayrıldı");
+            stop.Cancel(); // yalnız şəbəkə xətasında sessiyanı bitiririk
         }
         catch (Exception ex)
         {
-            log($"Capture xətası: {ex.Message}");
-            stop.Cancel();
+            // Digər xətalar — sessiyanı öldürmə, yenilə.
+            log($"capture: xəta (davam): {ex.Message}");
         }
     }
 
     private static void InputLoop(NetworkStream stream, CancellationTokenSource stop, Action<string> log)
     {
         string? attached = DesktopControl.AttachToInputDesktop();
+        log($"input: attach='{attached ?? "(alınmadı)"}'");
         try
         {
             var injector = new InputInjector();
@@ -157,6 +174,7 @@ public static class AgentStreamer
                 if (cur != attached)
                 {
                     attached = DesktopControl.AttachToInputDesktop();
+                    log($"input: masaüstü dəyişdi -> '{attached ?? "(alınmadı)"}'");
                 }
 
                 try { injector.Inject(msg); } catch { /* tək mesaj xətası döngəni dayandırmasın */ }
