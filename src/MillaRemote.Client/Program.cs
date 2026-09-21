@@ -32,14 +32,30 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     var agentPort = int.TryParse(args[3], out var ap) && ap > 0 ? ap : streamPort;
 
     var accepted = ShowRequestDialog();
-    var agentSession = new SessionStreamer(agentPort, streamFps, tileSize, Log);
+
+    // Qəbul olunarsa, ekran serverini (masaüstü-izləyən agent) ayrıca thread-də
+    // başladırıq ki, cavab göndərməzdən əvvəl port dinlənilsin.
+    var done = new ManualResetEventSlim(!accepted);
+    if (accepted)
+    {
+        var agentThread = new Thread(() =>
+        {
+            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(30), Log); }
+            finally { done.Set(); }
+        })
+        {
+            IsBackground = true,
+            Name = "agent-streamer",
+        };
+        agentThread.Start();
+        Thread.Sleep(200); // listener qalxsın
+    }
 
     var conn = new HubConnectionBuilder().WithUrl(agentRelay).Build();
     try
     {
         await conn.StartAsync();
-        var replyPort = accepted ? agentSession.Begin(TimeSpan.FromSeconds(30)) : 0;
-        await conn.InvokeAsync("ConnectionResponse", agentHost, accepted, replyPort);
+        await conn.InvokeAsync("ConnectionResponse", agentHost, accepted, accepted ? agentPort : 0);
     }
     catch (Exception ex)
     {
@@ -52,7 +68,7 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
 
     if (accepted)
     {
-        await agentSession.Completion; // viewer ayrılana / timeout-a qədər gözlə
+        done.Wait(); // viewer ayrılana / timeout-a qədər gözlə
     }
     return;
 }
