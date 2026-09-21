@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableExtensions
 REM ============================================================
-REM  MillaRemote Client - GPO Computer Startup skripti (loglu)
-REM  Log: %ProgramData%\MillaRemote\install.log
+REM  SRXDesk Client - GPO Computer Startup skripti (loglu)
+REM  Log: %ProgramData%\SRXDesk\install.log
 REM ============================================================
 
 set "SRC=\milladc01\software_deploy\dist-client"
-set "DEST=%ProgramData%\MillaRemote"
+set "DEST=%ProgramData%\SRXDesk"
 set "LOG=%DEST%\install.log"
 
 if not exist "%DEST%" mkdir "%DEST%"
@@ -16,30 +16,30 @@ echo SRC=%SRC%>> "%LOG%"
 echo istifadeci: %USERNAME%  komputer: %COMPUTERNAME%>> "%LOG%"
 
 REM --- Menbe elcatandirmi? ---
-if not exist "%SRC%\MillaRemote.Client.exe" (
-  echo XETA: menbe tapilmadi -^> %SRC%\MillaRemote.Client.exe>> "%LOG%"
+if not exist "%SRC%\SRXDesk.Client.exe" (
+  echo XETA: menbe tapilmadi -^> %SRC%\SRXDesk.Client.exe>> "%LOG%"
   echo XETA: "%SRC%" elcatan deyil. Paylasim icazeleri / sebeke.
   echo Ətraflı: %LOG%
   goto :end
 )
 
 REM --- Kopyala (loga yaz) ---
-robocopy "%SRC%" "%DEST%" MillaRemote.Client.exe appsettings.json /R:2 /W:3>> "%LOG%" 2>&1
+robocopy "%SRC%" "%DEST%" SRXDesk.Client.exe appsettings.json /R:2 /W:3>> "%LOG%" 2>&1
 echo robocopy exit=%ERRORLEVEL%>> "%LOG%"
 
 REM --- Yoxla ---
-if not exist "%DEST%\MillaRemote.Client.exe" (
+if not exist "%DEST%\SRXDesk.Client.exe" (
   echo XETA: kopyalama alinmadi.>> "%LOG%"
   echo XETA: fayl kopyalanmadi. Bax: %LOG%
   goto :end
 )
 
 REM --- Firewall: 7000 inbound ---
-netsh advfirewall firewall show rule name="MillaRemote Stream 7000" >nul 2>&1
-if errorlevel 1 netsh advfirewall firewall add rule name="MillaRemote Stream 7000" dir=in action=allow protocol=TCP localport=7000>> "%LOG%" 2>&1
+netsh advfirewall firewall show rule name="SRXDesk Stream 7000" >nul 2>&1
+if errorlevel 1 netsh advfirewall firewall add rule name="SRXDesk Stream 7000" dir=in action=allow protocol=TCP localport=7000>> "%LOG%" 2>&1
 
 REM --- Autostart (HKLM Run) ---
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v MillaRemote /t REG_SZ /d "\"%DEST%\MillaRemote.Client.exe\"" /f>> "%LOG%" 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v SRXDesk /t REG_SZ /d "\"%DEST%\SRXDesk.Client.exe\"" /f>> "%LOG%" 2>&1
 
 echo [%date% %time%] UGURLU: quraşdırma tamamlandi.>> "%LOG%"
 echo UGURLU. Client %DEST% qovlugunda. Log: %LOG%

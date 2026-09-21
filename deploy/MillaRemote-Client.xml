@@ -6,7 +6,7 @@
 -->
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>MillaRemote Client - uzaqdan qoşulma agenti</Description>
+    <Description>SRXDesk Client - uzaqdan qoşulma agenti</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -31,7 +31,7 @@
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>%ProgramData%\MillaRemote\MillaRemote.Client.exe</Command>
+      <Command>%ProgramData%\SRXDesk\SRXDesk.Client.exe</Command>
     </Exec>
   </Actions>
 </Task>

@@ -1,10 +1,10 @@
 services:
   relay:
     build:
-      context: ../../src/MillaRemote.Relay
+      context: ../../src/SRXDesk.Relay
       dockerfile: Dockerfile
-    image: millaremote-relay:latest
-    container_name: millaremote-relay
+    image: srxdesk-relay:latest
+    container_name: srxdesk-relay
     restart: unless-stopped
     ports:
       - "5100:5100"
