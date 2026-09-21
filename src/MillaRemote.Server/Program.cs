@@ -12,6 +12,7 @@ var config = new ConfigurationBuilder()
 
 var relayUrl = config["Relay:Url"] ?? "http://localhost:5100/remotehub";
 var fallbackPort = int.TryParse(config["Stream:Port"], out var fp) && fp > 0 ? fp : 7000;
+var adminSecret = config["Admin:Secret"] ?? "";
 
 var connection = new HubConnectionBuilder()
     .WithUrl(relayUrl)
@@ -57,7 +58,7 @@ Console.WriteLine("Relay-ə qoşulur...");
 try
 {
     await connection.StartAsync();
-    await connection.InvokeAsync("RegisterAdmin");
+    await connection.InvokeAsync("RegisterAdmin", adminSecret);
     Console.WriteLine("Qoşuldu.\n");
 }
 catch (Exception ex)
@@ -83,6 +84,9 @@ while (running)
         case "2":
             await RequestConnectionAsync();
             break;
+        case "4":
+            await LaunchElevatedAsync();
+            break;
         case "3":
             running = false;
             break;
@@ -102,6 +106,7 @@ void ShowMenu()
     Console.WriteLine("========================================");
     Console.WriteLine("  [1] Online olan kompüterlərin siyahısı");
     Console.WriteLine("  [2] Kompüterə qoşul (hostname daxil et)");
+    Console.WriteLine("  [4] Uzaq PC-də SYSTEM proqram aç (UAC-siz quraşdırma)");
     Console.WriteLine("  [3] Çıx");
     Console.WriteLine("========================================");
 }
@@ -160,7 +165,7 @@ async Task RequestConnectionAsync()
 
     try
     {
-        var result = await connection.InvokeAsync<RequestResult>("RequestConnection", target);
+        var result = await connection.InvokeAsync<RequestResult>("RequestConnection", adminSecret, target);
         if (result.Sent)
         {
             Console.WriteLine($"  Sorğu göndərildi: {result.Hostname}. İstifadəçinin cavabı gözlənilir...\n");
@@ -169,6 +174,48 @@ async Task RequestConnectionAsync()
         {
             Console.WriteLine($"  Sorğu göndərilmədi: {result.Error}\n");
         }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  Xəta: {ex.Message}\n");
+    }
+}
+
+async Task LaunchElevatedAsync()
+{
+    Console.Write("Hostname daxil edin: ");
+    var target = Console.ReadLine()?.Trim();
+    if (string.IsNullOrWhiteSpace(target))
+    {
+        Console.WriteLine("Hostname boş ola bilməz.\n");
+        return;
+    }
+
+    Console.WriteLine("  Nümunələr: cmd.exe  |  powershell.exe  |  msiexec.exe (arqument: /i C:\\setup.msi /qn)");
+    Console.Write("Proqram (məs. cmd.exe): ");
+    var program = Console.ReadLine()?.Trim();
+    if (string.IsNullOrWhiteSpace(program))
+    {
+        program = "cmd.exe";
+    }
+
+    Console.Write("Arqumentlər (boş ola bilər): ");
+    var arguments = Console.ReadLine()?.Trim() ?? "";
+
+    Console.WriteLine($"  DİQQƏT: '{program}' uzaq PC-də SYSTEM səlahiyyəti ilə açılacaq.");
+    Console.Write("  Təsdiq edirsiniz? (b/x): ");
+    if (!string.Equals(Console.ReadLine()?.Trim(), "b", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("  Ləğv edildi.\n");
+        return;
+    }
+
+    try
+    {
+        var result = await connection.InvokeAsync<RequestResult>("LaunchElevated", adminSecret, target, program, arguments);
+        Console.WriteLine(result.Sent
+            ? $"  Göndərildi: {result.Hostname} üzərində '{program}' SYSTEM kimi açılır.\n"
+            : $"  Göndərilmədi: {result.Error}\n");
     }
     catch (Exception ex)
     {

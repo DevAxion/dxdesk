@@ -150,14 +150,14 @@ static async Task RelayTestAsync(string relayUrl, CancellationToken ct)
     Log("Hər iki bağlantı quruldu.");
 
     await client.InvokeAsync("RegisterClient", testHost, cancellationToken: ct);
-    await admin.InvokeAsync("RegisterAdmin", cancellationToken: ct);
+    await admin.InvokeAsync("RegisterAdmin", "", cancellationToken: ct);
 
     var online = await admin.InvokeAsync<List<Dictionary<string, System.Text.Json.JsonElement>>>("GetOnlineClients", ct);
     var found = online.Any(c => c.TryGetValue("hostname", out var v) && v.GetString() == testHost);
     Log(found ? $"✓ Onlayn siyahıda '{testHost}' var." : $"✗ '{testHost}' siyahıda YOXDUR.");
 
     Log("Admin qoşulma sorğusu göndərir...");
-    var reqResult = await admin.InvokeAsync<System.Text.Json.JsonElement>("RequestConnection", testHost, ct);
+    var reqResult = await admin.InvokeAsync<System.Text.Json.JsonElement>("RequestConnection", "", testHost, ct);
     Log($"  RequestConnection.sent = {reqResult.GetProperty("sent").GetBoolean()}");
 
     var completed = await Task.WhenAny(responseTcs.Task, Task.Delay(5000, ct));

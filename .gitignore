@@ -8,3 +8,4 @@ publish/
 deploy/admin/
 deploy/vm-client/
 deploy/dist-client/
+deploy/service-package/

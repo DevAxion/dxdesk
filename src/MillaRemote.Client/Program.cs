@@ -20,6 +20,43 @@ var streamPort = int.TryParse(config["Stream:Port"], out var sp) && sp > 0 ? sp 
 var streamFps = int.TryParse(config["Stream:TargetFps"], out var sf) && sf > 0 ? sf : 12;
 var tileSize = int.TryParse(config["Stream:TileSize"], out var ts) && ts > 0 ? ts : 128;
 
+// ---- Agent rejimi ----
+// Xidmət (MillaRemote.Service) bunu aktiv sessiyada SYSTEM kimi buraxır:
+//   MillaRemote.Client.exe --agent <relayUrl> <hostname> <port>
+// SYSTEM integrity olduğu üçün elevated pəncərələri də idarə edə bilir.
+if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnoreCase))
+{
+    NativeMethods.HideConsoleWindow();
+    var agentRelay = args[1];
+    var agentHost = args[2];
+    var agentPort = int.TryParse(args[3], out var ap) && ap > 0 ? ap : streamPort;
+
+    var accepted = ShowRequestDialog();
+    var agentSession = new SessionStreamer(agentPort, streamFps, tileSize, Log);
+
+    var conn = new HubConnectionBuilder().WithUrl(agentRelay).Build();
+    try
+    {
+        await conn.StartAsync();
+        var replyPort = accepted ? agentSession.Begin(TimeSpan.FromSeconds(30)) : 0;
+        await conn.InvokeAsync("ConnectionResponse", agentHost, accepted, replyPort);
+    }
+    catch (Exception ex)
+    {
+        Log($"Agent cavab xətası: {ex.Message}");
+    }
+    finally
+    {
+        await conn.DisposeAsync();
+    }
+
+    if (accepted)
+    {
+        await agentSession.Completion; // viewer ayrılana / timeout-a qədər gözlə
+    }
+    return;
+}
+
 var hostname = Environment.MachineName;
 var session = new SessionStreamer(streamPort, streamFps, tileSize, Log);
 

@@ -17,6 +17,10 @@ public sealed class SessionStreamer
     private readonly Action<string> _log;
     private CancellationTokenSource? _cts;
     private bool _hadViewer;
+    private TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Sessiya bitəndə (viewer ayrıldı / timeout / Stop) tamamlanır.</summary>
+    public Task Completion => _done.Task;
 
     public SessionStreamer(int port, int targetFps, int tileSize, Action<string> log)
     {
@@ -35,6 +39,7 @@ public sealed class SessionStreamer
         var cts = new CancellationTokenSource();
         _cts = cts;
         _hadViewer = false;
+        _done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var server = new ScreenStreamServer(_port, _targetFps, _tileSize, _log);
         server.ViewersChanged += count =>
@@ -78,5 +83,6 @@ public sealed class SessionStreamer
         if (cts is null) return;
         try { cts.Cancel(); } catch { }
         cts.Dispose();
+        _done.TrySetResult();
     }
 }

@@ -13,11 +13,27 @@ public sealed class RemoteHub : Hub
 {
     private readonly ClientRegistry _registry;
     private readonly ILogger<RemoteHub> _logger;
+    private readonly string? _adminSecret;
 
-    public RemoteHub(ClientRegistry registry, ILogger<RemoteHub> logger)
+    public RemoteHub(ClientRegistry registry, ILogger<RemoteHub> logger, IConfiguration config)
     {
         _registry = registry;
         _logger = logger;
+        _adminSecret = config["Admin:Secret"];
+    }
+
+    /// <summary>
+    /// Admin əmrləri üçün token yoxlaması. Konfiqurasiyada Admin:Secret varsa,
+    /// yalnız düzgün token qəbul olunur (yalnız Sulxay-ın aləti əmr verə bilsin).
+    /// </summary>
+    private void RequireAdmin(string? token)
+    {
+        if (!string.IsNullOrEmpty(_adminSecret) &&
+            !string.Equals(token, _adminSecret, StringComparison.Ordinal))
+        {
+            _logger.LogWarning("İcazəsiz admin əmri cəhdi: {ConnectionId}", Context.ConnectionId);
+            throw new HubException("İcazə yoxdur (yanlış admin token).");
+        }
     }
 
     /// <summary>Kliyent qoşulan kimi öz hostname-i ilə qeydiyyatdan keçir.</summary>
@@ -41,8 +57,9 @@ public sealed class RemoteHub : Hub
     }
 
     /// <summary>Admin aləti qoşulanda çağırır — onlayn siyahı yeniliklərini almaq üçün.</summary>
-    public async Task RegisterAdmin()
+    public async Task RegisterAdmin(string token)
     {
+        RequireAdmin(token);
         _registry.AddAdmin(Context.ConnectionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, ClientRegistry.AdminGroup);
         _logger.LogInformation("Admin qoşuldu: {ConnectionId}", Context.ConnectionId);
@@ -54,8 +71,9 @@ public sealed class RemoteHub : Hub
     public IReadOnlyList<ClientInfo> GetOnlineClients() => _registry.GetClients();
 
     /// <summary>Admin çağırır: göstərilən kompüterə qoşulma sorğusu göndər.</summary>
-    public async Task<RequestResult> RequestConnection(string targetHostname)
+    public async Task<RequestResult> RequestConnection(string token, string targetHostname)
     {
+        RequireAdmin(token);
         if (string.IsNullOrWhiteSpace(targetHostname))
         {
             return new RequestResult(false, "Hostname boş ola bilməz.", null, null);
@@ -71,6 +89,29 @@ public sealed class RemoteHub : Hub
         await Clients.Client(client.ConnectionId).SendAsync("ConnectionRequest", client.Hostname);
         _logger.LogInformation("Qoşulma sorğusu göndərildi: {Hostname}", client.Hostname);
 
+        return new RequestResult(true, null, client.Hostname, client.IpAddress);
+    }
+
+    /// <summary>
+    /// Admin çağırır: uzaq kompüterdə proqramı SYSTEM kimi işə sal (UAC-siz
+    /// quraşdırma/silmə). Yalnız düzgün admin token ilə.
+    /// </summary>
+    public async Task<RequestResult> LaunchElevated(string token, string targetHostname, string program, string arguments)
+    {
+        RequireAdmin(token);
+        if (string.IsNullOrWhiteSpace(targetHostname) || string.IsNullOrWhiteSpace(program))
+        {
+            return new RequestResult(false, "Hostname və proqram tələb olunur.", null, null);
+        }
+
+        var client = _registry.GetByHostname(targetHostname);
+        if (client is null)
+        {
+            return new RequestResult(false, $"'{targetHostname.Trim()}' onlayn deyil.", null, null);
+        }
+
+        await Clients.Client(client.ConnectionId).SendAsync("LaunchElevated", program, arguments ?? string.Empty);
+        _logger.LogInformation("Elevated launch göndərildi: {Hostname} -> {Program}", client.Hostname, program);
         return new RequestResult(true, null, client.Hostname, client.IpAddress);
     }
 

@@ -11,3 +11,7 @@ services:
     environment:
       - ASPNETCORE_URLS=http://0.0.0.0:5100
       - ASPNETCORE_ENVIRONMENT=Production
+      # Admin token — YALNIZ Sulxay-ın admin aləti əmr verə bilsin deyə.
+      # Eyni dəyəri admin Server appsettings.json-da da yazın. Boş buraxsanız
+      # (dev) yoxlama söndürülür. Produksiyada mütləq güclü açar qoyun.
+      - Admin__Secret=${MILLA_ADMIN_SECRET:-}
