@@ -48,6 +48,17 @@ REM --- Kohne (client-only) autostart-i temizle ---
 reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v SRXDesk /f >nul 2>&1
 schtasks /delete /tn "SRXDeskKick" /f >nul 2>&1
 
+REM --- MIQRASIYA: kohne MillaRemote deploymentini tamamile temizle ---
+sc stop MillaRemote >nul 2>&1
+sc delete MillaRemote >nul 2>&1
+reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v MillaRemote /f >nul 2>&1
+schtasks /delete /tn "MillaRemoteKick" /f >nul 2>&1
+taskkill /im MillaRemote.Client.exe /f >nul 2>&1
+taskkill /im MillaRemote.Service.exe /f >nul 2>&1
+timeout /t 2 /nobreak >nul 2>&1
+rmdir /s /q "%ProgramData%\MillaRemote" >nul 2>&1
+netsh advfirewall firewall delete rule name="MillaRemote Stream 7000" >nul 2>&1
+
 REM --- Xidmeti qeydiyyatdan kecir (yoxdursa) ---
 sc query SRXDesk >nul 2>&1
 if errorlevel 1 (
