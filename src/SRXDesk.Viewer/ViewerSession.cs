@@ -50,6 +50,16 @@ public static class ViewerSession
                     using var decoder = new TileFrameDecoder();
                     await receiver.ReceiveLoopAsync(payload =>
                     {
+                        // Clipboard kadrı (agent -> viewer): lokal clipboard-a yaz.
+                        if (payload.Length >= 1 && payload[0] == TileScreenEncoder.KindClipboard)
+                        {
+                            var text = payload.Length > 1
+                                ? System.Text.Encoding.UTF8.GetString(payload, 1, payload.Length - 1)
+                                : string.Empty;
+                            form.SetClipboard(text);
+                            return;
+                        }
+
                         var canvas = decoder.Apply(payload);
                         if (canvas is not null) form.ShowBitmap(canvas, payload.Length);
                     }, cts.Token);

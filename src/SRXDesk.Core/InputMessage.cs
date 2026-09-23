@@ -10,6 +10,7 @@ public enum InputType : byte
     MouseWheel = 4,
     KeyDown = 5,
     KeyUp = 6,
+    Clipboard = 7,
 }
 
 public enum MouseButtonKind : byte
@@ -52,4 +53,18 @@ public static class InputMessage
         BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(1), virtualKey);
         return b;
     }
+
+    /// <summary>Viewer -> Host clipboard mətni: [7][utf8].</summary>
+    public static byte[] Clipboard(string text)
+    {
+        var t = System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty);
+        var b = new byte[1 + t.Length];
+        b[0] = (byte)InputType.Clipboard;
+        Array.Copy(t, 0, b, 1, t.Length);
+        return b;
+    }
+
+    /// <summary>Clipboard mesajından mətni çıxarır.</summary>
+    public static string ReadClipboardText(byte[] msg) =>
+        msg.Length <= 1 ? string.Empty : System.Text.Encoding.UTF8.GetString(msg, 1, msg.Length - 1);
 }

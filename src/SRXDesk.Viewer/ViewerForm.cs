@@ -15,6 +15,8 @@ public sealed class ViewerForm : Form
     private readonly PictureBox _picture;
     private readonly StatusStrip _status;
     private readonly ToolStripStatusLabel _infoLabel;
+    private readonly System.Windows.Forms.Timer _clipTimer;
+    private string _lastClip = string.Empty;
 
     // FPS və bant hesablaması üçün.
     private int _frameCount;
@@ -54,6 +56,44 @@ public sealed class ViewerForm : Form
         _picture.MouseWheel += (_, e) => { if (EnableInput) Raise(InputMessage.MouseWheel((short)e.Delta)); };
         KeyDown += (_, e) => { if (EnableInput) { Raise(InputMessage.Key(true, (ushort)e.KeyValue)); e.SuppressKeyPress = true; } };
         KeyUp += (_, e) => { if (EnableInput) { Raise(InputMessage.Key(false, (ushort)e.KeyValue)); e.SuppressKeyPress = true; } };
+
+        // Clipboard sinxronu: lokal clipboard dəyişəndə uzaq PC-yə göndər.
+        _clipTimer = new System.Windows.Forms.Timer { Interval = 600 };
+        _clipTimer.Tick += (_, _) => PollLocalClipboard();
+        _clipTimer.Start();
+        FormClosed += (_, _) => _clipTimer.Stop();
+    }
+
+    private void PollLocalClipboard()
+    {
+        if (!EnableInput) return;
+        try
+        {
+            if (!Clipboard.ContainsText()) return;
+            var text = Clipboard.GetText();
+            if (text == _lastClip) return;
+            _lastClip = text;
+            Raise(InputMessage.Clipboard(text));
+        }
+        catch { /* clipboard kilidli ola bilər — buraxırıq */ }
+    }
+
+    /// <summary>Uzaq PC-dən gələn clipboard mətnini lokal clipboard-a yazır (echo-suz).</summary>
+    public void SetClipboard(string text)
+    {
+        if (IsDisposed || Disposing) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => SetClipboard(text)); } catch (InvalidOperationException) { }
+            return;
+        }
+        _lastClip = text;
+        try
+        {
+            if (string.IsNullOrEmpty(text)) Clipboard.Clear();
+            else Clipboard.SetText(text);
+        }
+        catch { /* clipboard kilidli ola bilər */ }
     }
 
     /// <summary>true olanda siçan/klaviatura host-a göndərilir (uzaqdan idarə).</summary>

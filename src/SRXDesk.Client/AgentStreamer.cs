@@ -39,8 +39,9 @@ public static class AgentStreamer
                 client.NoDelay = true;
                 var stream = client.GetStream();
                 var stop = new CancellationTokenSource();
+                var clip = new ClipSync();
 
-                var input = new Thread(() => InputLoop(stream, stop, log))
+                var input = new Thread(() => InputLoop(stream, stop, clip, log))
                 {
                     IsBackground = true,
                     Name = "agent-input",
@@ -50,7 +51,7 @@ public static class AgentStreamer
                 // Capture supervisor: masaüstü dəyişəndə təzə thread yaradır.
                 while (!stop.IsCancellationRequested)
                 {
-                    var capture = new Thread(() => CaptureOnCurrentDesktop(stream, targetFps, tileSize, stop, log))
+                    var capture = new Thread(() => CaptureOnCurrentDesktop(stream, targetFps, tileSize, stop, clip, log))
                     {
                         IsBackground = true,
                         Name = "agent-capture",
@@ -94,12 +95,13 @@ public static class AgentStreamer
     /// ləğv edir.
     /// </summary>
     private static void CaptureOnCurrentDesktop(
-        NetworkStream stream, int targetFps, int tileSize, CancellationTokenSource stop, Action<string> log)
+        NetworkStream stream, int targetFps, int tileSize, CancellationTokenSource stop, ClipSync clip, Action<string> log)
     {
         // Təzə thread-in İLK addımı: aktiv masaüstünə keç (GDI-dən əvvəl).
         var desktop = DesktopControl.AttachToInputDesktop();
         log($"capture: attach='{desktop ?? "(alınmadı)"}'");
         var interval = TimeSpan.FromSeconds(1.0 / Math.Clamp(targetFps, 1, 60));
+        var lastClipPoll = DateTime.MinValue;
 
         try
         {
@@ -114,6 +116,16 @@ public static class AgentStreamer
                 {
                     log($"capture: masaüstü dəyişdi '{desktop}' -> '{current}', yenilənir");
                     return;
+                }
+
+                // Clipboard-u ~500ms-dən bir yoxla; dəyişibsə viewer-ə göndər.
+                if ((start - lastClipPoll).TotalMilliseconds >= 500)
+                {
+                    lastClipPoll = start;
+                    if (clip.TryGetLocalChange(out var clipText))
+                    {
+                        WriteFrame(stream, BuildClipboardFrame(clipText));
+                    }
                 }
 
                 byte[]? payload;
@@ -153,7 +165,7 @@ public static class AgentStreamer
         }
     }
 
-    private static void InputLoop(NetworkStream stream, CancellationTokenSource stop, Action<string> log)
+    private static void InputLoop(NetworkStream stream, CancellationTokenSource stop, ClipSync clip, Action<string> log)
     {
         string? attached = DesktopControl.AttachToInputDesktop();
         log($"input: attach='{attached ?? "(alınmadı)"}'");
@@ -166,6 +178,13 @@ public static class AgentStreamer
                 if (msg is null)
                 {
                     break;
+                }
+
+                // Clipboard mesajı (viewer -> agent): uzaq clipboard-a yaz.
+                if (msg.Length >= 1 && msg[0] == (byte)InputType.Clipboard)
+                {
+                    clip.ApplyFromRemote(InputMessage.ReadClipboardText(msg));
+                    continue;
                 }
 
                 // Masaüstü dəyişibsə, input thread-ini yeni masaüstünə keçir
@@ -191,6 +210,54 @@ public static class AgentStreamer
         finally
         {
             stop.Cancel();
+        }
+    }
+
+    /// <summary>Agent -> viewer clipboard kadrı: [2][utf8].</summary>
+    private static byte[] BuildClipboardFrame(string text)
+    {
+        var t = System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty);
+        var b = new byte[1 + t.Length];
+        b[0] = TileScreenEncoder.KindClipboard;
+        Array.Copy(t, 0, b, 1, t.Length);
+        return b;
+    }
+
+    /// <summary>
+    /// Uzaq (agent) clipboard-un vəziyyətini izləyir və echo-nun qarşısını alır:
+    /// viewer-dən gələni tətbiq edəndə "son" dəyəri yeniləyirik ki, poll onu
+    /// geri göndərməsin.
+    /// </summary>
+    private sealed class ClipSync
+    {
+        private readonly object _lock = new();
+        private string? _last;
+
+        /// <summary>Lokal clipboard dəyişibsə true + yeni mətn.</summary>
+        public bool TryGetLocalChange(out string text)
+        {
+            text = string.Empty;
+            string? current;
+            try { current = ClipboardText.Get(); } catch { return false; }
+            if (current is null) return false;
+            lock (_lock)
+            {
+                if (current == _last) return false;
+                _last = current;
+            }
+            text = current;
+            return true;
+        }
+
+        /// <summary>Viewer-dən gələn mətni uzaq clipboard-a yazır (echo-suz).</summary>
+        public void ApplyFromRemote(string text)
+        {
+            lock (_lock)
+            {
+                if (text == _last) return;
+                _last = text;
+            }
+            try { ClipboardText.Set(text); } catch { }
         }
     }
 

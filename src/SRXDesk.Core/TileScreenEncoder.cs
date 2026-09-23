@@ -19,6 +19,7 @@ public sealed class TileScreenEncoder : IDisposable
 {
     public const byte KindKeyFrame = 0;
     public const byte KindDelta = 1;
+    public const byte KindClipboard = 2; // agent -> viewer clipboard mətni: [2][utf8]
 
     private readonly int _tile;
     private readonly ScreenCapturer _capturer = new();
