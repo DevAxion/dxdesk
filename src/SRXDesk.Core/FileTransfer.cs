@@ -132,6 +132,7 @@ public sealed class FileTransferReceiver : IDisposable
 {
     private readonly Action<string[]> _setClipboard;
     private readonly Action<string> _log;
+    private readonly string _stageBase;
 
     private string? _stageRoot;
     private List<FileStream>? _streams;
@@ -140,9 +141,14 @@ public sealed class FileTransferReceiver : IDisposable
     /// <summary>Son qəbul edilən dəstin imzası (echo qorunması üçün).</summary>
     public string? LastSignature { get; private set; }
 
-    public FileTransferReceiver(Action<string[]> setClipboard, Action<string> log)
+    /// <param name="stageBase">
+    /// Faylların yazılacağı əsas qovluq. Qəbul edən tərəf yapışdıra bilməsi üçün
+    /// həmin istifadəçinin OXUYA biləcəyi yer olmalıdır (agent SYSTEM olsa da).
+    /// </param>
+    public FileTransferReceiver(Action<string[]> setClipboard, string stageBase, Action<string> log)
     {
         _setClipboard = setClipboard;
+        _stageBase = stageBase;
         _log = log;
     }
 
@@ -169,7 +175,7 @@ public sealed class FileTransferReceiver : IDisposable
     private void OnManifest(byte[] b)
     {
         Cleanup();
-        _stageRoot = Path.Combine(Path.GetTempPath(), "SRXDesk", "clip", Guid.NewGuid().ToString("N"));
+        _stageRoot = Path.Combine(_stageBase, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_stageRoot);
 
         var pos = 1;

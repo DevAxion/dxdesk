@@ -244,7 +244,14 @@ public static class AgentStreamer
         public ClipSync(Action<string> log)
         {
             _log = log;
-            _fileRecv = new FileTransferReceiver(paths => { try { FileClipboard.Set(paths); } catch (Exception ex) { log($"clip: fayl set xətası: {ex.Message}"); } }, log);
+            // Agent SYSTEM-dir → faylları istifadəçinin OXUYA biləcəyi yerə yaz
+            // (%ProgramData%\SRXDesk\clip; SYSTEM yazır, user oxuyur). SYSTEM temp OLMAZ.
+            var stageBase = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "SRXDesk", "clip");
+            _fileRecv = new FileTransferReceiver(
+                paths => { try { FileClipboard.Set(paths); } catch (Exception ex) { log($"clip: fayl set xətası: {ex.Message}"); } },
+                stageBase, log);
         }
 
         /// <summary>Lokal clipboard dəyişibsə agent->viewer kadr(lar)ını qaytarır.</summary>

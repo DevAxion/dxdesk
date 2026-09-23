@@ -59,7 +59,9 @@ public sealed class ViewerForm : Form
         KeyUp += (_, e) => { if (EnableInput) { Raise(InputMessage.Key(false, (ushort)e.KeyValue)); e.SuppressKeyPress = true; } };
 
         // Clipboard sinxronu: lokal clipboard dəyişəndə uzaq PC-yə göndər (mətn + fayl).
-        _fileRecv = new SRXDesk.Core.FileTransferReceiver(SetClipboardFiles, _ => { });
+        // Viewer istifadəçi kontekstindədir — öz temp qovluğuna yazmaq kifayətdir.
+        var clipStage = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "SRXDesk", "clip");
+        _fileRecv = new SRXDesk.Core.FileTransferReceiver(SetClipboardFiles, clipStage, _ => { });
         _clipTimer = new System.Windows.Forms.Timer { Interval = 600 };
         _clipTimer.Tick += (_, _) => PollLocalClipboard();
         _clipTimer.Start();
