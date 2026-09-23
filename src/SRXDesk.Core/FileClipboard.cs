@@ -13,12 +13,14 @@ public static class FileClipboard
 {
     private const uint CF_HDROP = 15;
     private const uint GMEM_MOVEABLE = 0x0002;
+    private const uint DROPEFFECT_COPY = 5;
 
     [DllImport("user32.dll", SetLastError = true)] private static extern bool OpenClipboard(IntPtr h);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool CloseClipboard();
     [DllImport("user32.dll", SetLastError = true)] private static extern bool EmptyClipboard();
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr GetClipboardData(uint fmt);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetClipboardData(uint fmt, IntPtr h);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormat(string lpszFormat);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GlobalLock(IntPtr h);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(IntPtr h);
@@ -79,9 +81,28 @@ public static class FileClipboard
                 Marshal.Copy(listBytes, 0, p2 + header, listBytes.Length);
             }
             finally { GlobalUnlock(hMem); }
-            return SetClipboardData(CF_HDROP, hMem) != IntPtr.Zero;
+
+            if (SetClipboardData(CF_HDROP, hMem) == IntPtr.Zero) return false;
+
+            // "Preferred DropEffect" = Copy — paste-in etibarlı işləməsi üçün.
+            SetPreferredDropEffect(DROPEFFECT_COPY);
+            return true;
         }
         finally { CloseClipboard(); }
+    }
+
+    /// <summary>Clipboard-a "Preferred DropEffect" (Copy/Move) formatını əlavə edir.</summary>
+    private static void SetPreferredDropEffect(uint effect)
+    {
+        var fmt = RegisterClipboardFormat("Preferred DropEffect");
+        if (fmt == 0) return;
+        var hMem = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)4);
+        if (hMem == IntPtr.Zero) return;
+        var p = GlobalLock(hMem);
+        if (p == IntPtr.Zero) return;
+        try { Marshal.WriteInt32(p, (int)effect); }
+        finally { GlobalUnlock(hMem); }
+        SetClipboardData(fmt, hMem);
     }
 
     private static bool TryOpen()

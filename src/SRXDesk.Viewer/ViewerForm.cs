@@ -141,7 +141,11 @@ public sealed class ViewerForm : Form
         {
             var col = new System.Collections.Specialized.StringCollection();
             col.AddRange(paths);
-            Clipboard.SetFileDropList(col);
+            var data = new DataObject();
+            data.SetFileDropList(col);
+            // "Preferred DropEffect" = Copy (5) — paste-in etibarlı işləməsi üçün.
+            data.SetData("Preferred DropEffect", new System.IO.MemoryStream(BitConverter.GetBytes(5)));
+            Clipboard.SetDataObject(data, true);
         }
         catch { /* clipboard kilidli ola bilər */ }
     }
