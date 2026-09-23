@@ -61,11 +61,23 @@ public sealed class ViewerForm : Form
         // Clipboard sinxronu: lokal clipboard dəyişəndə uzaq PC-yə göndər (mətn + fayl).
         // Viewer istifadəçi kontekstindədir — öz temp qovluğuna yazmaq kifayətdir.
         var clipStage = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "SRXDesk", "clip");
-        _fileRecv = new SRXDesk.Core.FileTransferReceiver(SetClipboardFiles, clipStage, _ => { });
+        _fileRecv = new SRXDesk.Core.FileTransferReceiver(SetClipboardFiles, clipStage, VLog);
         _clipTimer = new System.Windows.Forms.Timer { Interval = 600 };
         _clipTimer.Tick += (_, _) => PollLocalClipboard();
         _clipTimer.Start();
         FormClosed += (_, _) => _clipTimer.Stop();
+    }
+
+    /// <summary>Viewer (admin) tərəf diaqnostika loqu: %TEMP%\SRXDesk-viewer.log</summary>
+    private static void VLog(string m)
+    {
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "SRXDesk-viewer.log"),
+                $"[{DateTime.Now:HH:mm:ss}] {m}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     private void PollLocalClipboard()
@@ -82,6 +94,7 @@ public sealed class ViewerForm : Form
                 var sig = SRXDesk.Core.FileTransfer.Signature(files);
                 if (sig == _lastClipSig) return;
                 _lastClipSig = sig;
+                VLog($"admin clipboard-da {files.Length} fayl -> uzaq PC-yə göndərilir");
                 foreach (var frame in SRXDesk.Core.FileTransfer.Build(files, (byte)InputType.File))
                 {
                     Raise(frame);
@@ -146,8 +159,9 @@ public sealed class ViewerForm : Form
             // "Preferred DropEffect" = Copy (5) — paste-in etibarlı işləməsi üçün.
             data.SetData("Preferred DropEffect", new System.IO.MemoryStream(BitConverter.GetBytes(5)));
             Clipboard.SetDataObject(data, true);
+            VLog($"admin clipboard-a {paths.Length} fayl qoyuldu: {(paths.Length > 0 ? paths[0] : "")}");
         }
-        catch { /* clipboard kilidli ola bilər */ }
+        catch (Exception ex) { VLog($"admin clipboard set xətası: {ex.Message}"); }
     }
 
     /// <summary>true olanda siçan/klaviatura host-a göndərilir (uzaqdan idarə).</summary>
