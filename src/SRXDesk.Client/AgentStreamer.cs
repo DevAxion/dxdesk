@@ -39,7 +39,7 @@ public static class AgentStreamer
                 client.NoDelay = true;
                 var stream = client.GetStream();
                 var stop = new CancellationTokenSource();
-                var clip = new ClipSync();
+                var clip = new ClipSync(log);
 
                 var input = new Thread(() => InputLoop(stream, stop, clip, log))
                 {
@@ -239,10 +239,12 @@ public static class AgentStreamer
         private readonly object _lock = new();
         private string? _lastSig;
         private readonly FileTransferReceiver _fileRecv;
+        private readonly Action<string> _log;
 
-        public ClipSync()
+        public ClipSync(Action<string> log)
         {
-            _fileRecv = new FileTransferReceiver(paths => { try { FileClipboard.Set(paths); } catch { } }, _ => { });
+            _log = log;
+            _fileRecv = new FileTransferReceiver(paths => { try { FileClipboard.Set(paths); } catch (Exception ex) { log($"clip: fayl set xətası: {ex.Message}"); } }, log);
         }
 
         /// <summary>Lokal clipboard dəyişibsə agent->viewer kadr(lar)ını qaytarır.</summary>
@@ -255,6 +257,7 @@ public static class AgentStreamer
             {
                 var sig = FileTransfer.Signature(files);
                 lock (_lock) { if (sig == _lastSig) return Array.Empty<byte[]>(); _lastSig = sig; }
+                _log($"clip: {files.Length} element viewer-ə göndərilir (fayl)");
                 return FileTransfer.Build(files, TileScreenEncoder.KindFile);
             }
 

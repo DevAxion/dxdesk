@@ -28,7 +28,7 @@ public static class DesktopControl
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool CloseDesktop(IntPtr hDesktop);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("user32.dll", EntryPoint = "GetUserObjectInformationW", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool GetUserObjectInformation(
         IntPtr hObj, int nIndex, byte[]? pvInfo, uint nLength, out uint lpnLengthNeeded);
 
