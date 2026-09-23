@@ -118,13 +118,13 @@ public static class AgentStreamer
                     return;
                 }
 
-                // Clipboard-u ~500ms-dən bir yoxla; dəyişibsə viewer-ə göndər.
+                // Clipboard-u ~500ms-dən bir yoxla; dəyişibsə viewer-ə göndər (mətn və ya fayl).
                 if ((start - lastClipPoll).TotalMilliseconds >= 500)
                 {
                     lastClipPoll = start;
-                    if (clip.TryGetLocalChange(out var clipText))
+                    foreach (var frame in clip.PollChanges())
                     {
-                        WriteFrame(stream, BuildClipboardFrame(clipText));
+                        WriteFrame(stream, frame);
                     }
                 }
 
@@ -180,10 +180,16 @@ public static class AgentStreamer
                     break;
                 }
 
-                // Clipboard mesajı (viewer -> agent): uzaq clipboard-a yaz.
+                // Clipboard mətni (viewer -> agent): uzaq clipboard-a yaz.
                 if (msg.Length >= 1 && msg[0] == (byte)InputType.Clipboard)
                 {
-                    clip.ApplyFromRemote(InputMessage.ReadClipboardText(msg));
+                    clip.ApplyText(InputMessage.ReadClipboardText(msg));
+                    continue;
+                }
+                // Fayl köçürmə (viewer -> agent).
+                if (msg.Length >= 1 && msg[0] == (byte)InputType.File)
+                {
+                    clip.HandleFileSub(msg[1..]);
                     continue;
                 }
 
@@ -224,40 +230,62 @@ public static class AgentStreamer
     }
 
     /// <summary>
-    /// Uzaq (agent) clipboard-un vəziyyətini izləyir və echo-nun qarşısını alır:
-    /// viewer-dən gələni tətbiq edəndə "son" dəyəri yeniləyirik ki, poll onu
-    /// geri göndərməsin.
+    /// Uzaq (agent) clipboard-un vəziyyətini izləyir (mətn + fayl) və echo-nun
+    /// qarşısını alır. İmza (_lastSig) həm göndərilən, həm tətbiq edilən vəziyyəti
+    /// izləyir ki, dövr yaranmasın.
     /// </summary>
     private sealed class ClipSync
     {
         private readonly object _lock = new();
-        private string? _last;
+        private string? _lastSig;
+        private readonly FileTransferReceiver _fileRecv;
 
-        /// <summary>Lokal clipboard dəyişibsə true + yeni mətn.</summary>
-        public bool TryGetLocalChange(out string text)
+        public ClipSync()
         {
-            text = string.Empty;
-            string? current;
-            try { current = ClipboardText.Get(); } catch { return false; }
-            if (current is null) return false;
-            lock (_lock)
+            _fileRecv = new FileTransferReceiver(paths => { try { FileClipboard.Set(paths); } catch { } }, _ => { });
+        }
+
+        /// <summary>Lokal clipboard dəyişibsə agent->viewer kadr(lar)ını qaytarır.</summary>
+        public IEnumerable<byte[]> PollChanges()
+        {
+            // Əvvəl fayl (CF_HDROP), sonra mətn.
+            string[]? files = null;
+            try { files = FileClipboard.Get(); } catch { }
+            if (files is { Length: > 0 })
             {
-                if (current == _last) return false;
-                _last = current;
+                var sig = FileTransfer.Signature(files);
+                lock (_lock) { if (sig == _lastSig) return Array.Empty<byte[]>(); _lastSig = sig; }
+                return FileTransfer.Build(files, TileScreenEncoder.KindFile);
             }
-            text = current;
-            return true;
+
+            string? text = null;
+            try { text = ClipboardText.Get(); } catch { }
+            if (text is not null)
+            {
+                var sig = "T:" + text;
+                lock (_lock) { if (sig == _lastSig) return Array.Empty<byte[]>(); _lastSig = sig; }
+                return new[] { BuildClipboardFrame(text) };
+            }
+
+            return Array.Empty<byte[]>();
         }
 
         /// <summary>Viewer-dən gələn mətni uzaq clipboard-a yazır (echo-suz).</summary>
-        public void ApplyFromRemote(string text)
+        public void ApplyText(string text)
         {
-            lock (_lock)
-            {
-                if (text == _last) return;
-                _last = text;
-            }
+            var sig = "T:" + text;
+            lock (_lock) { if (sig == _lastSig) return; _lastSig = sig; }
             try { ClipboardText.Set(text); } catch { }
+        }
+
+        /// <summary>Viewer-dən gələn fayl köçürmə mesajını emal edir.</summary>
+        public void HandleFileSub(byte[] sub)
+        {
+            _fileRecv.Handle(sub);
+            if (sub.Length >= 1 && sub[0] == FileTransfer.SubCommit && _fileRecv.LastSignature is not null)
+            {
+                lock (_lock) { _lastSig = _fileRecv.LastSignature; }
+            }
         }
     }
 

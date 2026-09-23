@@ -16,7 +16,8 @@ public sealed class ViewerForm : Form
     private readonly StatusStrip _status;
     private readonly ToolStripStatusLabel _infoLabel;
     private readonly System.Windows.Forms.Timer _clipTimer;
-    private string _lastClip = string.Empty;
+    private string _lastClipSig = string.Empty;
+    private readonly SRXDesk.Core.FileTransferReceiver _fileRecv;
 
     // FPS və bant hesablaması üçün.
     private int _frameCount;
@@ -57,7 +58,8 @@ public sealed class ViewerForm : Form
         KeyDown += (_, e) => { if (EnableInput) { Raise(InputMessage.Key(true, (ushort)e.KeyValue)); e.SuppressKeyPress = true; } };
         KeyUp += (_, e) => { if (EnableInput) { Raise(InputMessage.Key(false, (ushort)e.KeyValue)); e.SuppressKeyPress = true; } };
 
-        // Clipboard sinxronu: lokal clipboard dəyişəndə uzaq PC-yə göndər.
+        // Clipboard sinxronu: lokal clipboard dəyişəndə uzaq PC-yə göndər (mətn + fayl).
+        _fileRecv = new SRXDesk.Core.FileTransferReceiver(SetClipboardFiles, _ => { });
         _clipTimer = new System.Windows.Forms.Timer { Interval = 600 };
         _clipTimer.Tick += (_, _) => PollLocalClipboard();
         _clipTimer.Start();
@@ -69,11 +71,30 @@ public sealed class ViewerForm : Form
         if (!EnableInput) return;
         try
         {
-            if (!Clipboard.ContainsText()) return;
-            var text = Clipboard.GetText();
-            if (text == _lastClip) return;
-            _lastClip = text;
-            Raise(InputMessage.Clipboard(text));
+            // Əvvəl fayl, sonra mətn.
+            if (Clipboard.ContainsFileDropList())
+            {
+                var col = Clipboard.GetFileDropList();
+                var files = new string[col.Count];
+                col.CopyTo(files, 0);
+                var sig = SRXDesk.Core.FileTransfer.Signature(files);
+                if (sig == _lastClipSig) return;
+                _lastClipSig = sig;
+                foreach (var frame in SRXDesk.Core.FileTransfer.Build(files, (byte)InputType.File))
+                {
+                    Raise(frame);
+                }
+                return;
+            }
+
+            if (Clipboard.ContainsText())
+            {
+                var text = Clipboard.GetText();
+                var sig = "T:" + text;
+                if (sig == _lastClipSig) return;
+                _lastClipSig = sig;
+                Raise(InputMessage.Clipboard(text));
+            }
         }
         catch { /* clipboard kilidli ola bilər — buraxırıq */ }
     }
@@ -87,11 +108,38 @@ public sealed class ViewerForm : Form
             try { BeginInvoke(() => SetClipboard(text)); } catch (InvalidOperationException) { }
             return;
         }
-        _lastClip = text;
+        _lastClipSig = "T:" + text;
         try
         {
             if (string.IsNullOrEmpty(text)) Clipboard.Clear();
             else Clipboard.SetText(text);
+        }
+        catch { /* clipboard kilidli ola bilər */ }
+    }
+
+    /// <summary>Uzaq PC-dən gələn fayl köçürmə mesajını emal edir.</summary>
+    public void HandleFileFrame(byte[] sub)
+    {
+        _fileRecv.Handle(sub);
+        if (sub.Length >= 1 && sub[0] == SRXDesk.Core.FileTransfer.SubCommit && _fileRecv.LastSignature is not null)
+        {
+            _lastClipSig = _fileRecv.LastSignature;
+        }
+    }
+
+    private void SetClipboardFiles(string[] paths)
+    {
+        if (IsDisposed || Disposing) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => SetClipboardFiles(paths)); } catch (InvalidOperationException) { }
+            return;
+        }
+        try
+        {
+            var col = new System.Collections.Specialized.StringCollection();
+            col.AddRange(paths);
+            Clipboard.SetFileDropList(col);
         }
         catch { /* clipboard kilidli ola bilər */ }
     }

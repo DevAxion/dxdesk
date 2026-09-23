@@ -11,6 +11,7 @@ public enum InputType : byte
     KeyDown = 5,
     KeyUp = 6,
     Clipboard = 7,
+    File = 8, // viewer -> agent fayl köçürmə (sub-payload FileTransfer formatında)
 }
 
 public enum MouseButtonKind : byte
