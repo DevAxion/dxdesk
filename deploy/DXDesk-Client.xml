@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Alternativ yayım üsulu: Zamanlanmış Tapşırıq (Scheduled Task).
+  GPO -> Computer Configuration -> Preferences -> Scheduled Tasks
+  ilə import edilə bilər. İstifadəçi girişində işə düşür.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>DXDesk Client - uzaqdan qoşulma agenti</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <GroupId>S-1-5-32-545</GroupId>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>%ProgramData%\DXDesk\DXDesk.Client.exe</Command>
+    </Exec>
+  </Actions>
+</Task>

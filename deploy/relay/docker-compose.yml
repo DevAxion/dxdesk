@@ -1,10 +1,10 @@
 services:
   relay:
     build:
-      context: ../../src/SRXDesk.Relay
+      context: ../../src/DXDesk.Relay
       dockerfile: Dockerfile
-    image: srxdesk-relay:latest
-    container_name: srxdesk-relay
+    image: dxdesk-relay:latest
+    container_name: dxdesk-relay
     restart: unless-stopped
     ports:
       - "5100:5100"

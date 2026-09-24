@@ -1,4 +1,4 @@
-# SRXDesk
+# DXDesk
 
 Daxili IT üçün **AnyDesk tipli uzaqdan dəstək aləti** — sıfırdan yazılıb (RDP-siz).
 Admin (IT) bir kompüterə qoşulmaq istəyəndə, həmin kompüterdəki istifadəçiyə
@@ -6,7 +6,7 @@ Admin (IT) bir kompüterə qoşulmaq istəyəndə, həmin kompüterdəki istifad
 onun **ekranını canlı görür və idarə edir** (istifadəçi hər şeyi görür).
 
 RDP-dən fərqi: RDP istifadəçini sessiyadan çıxarır və çoxlarında bağlıdır.
-SRXDesk isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
+DXDesk isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
 
 ```
 ┌────────────────┐  RequestConnection  ┌───────────────┐  ConnectionRequest  ┌─────────────────┐
@@ -23,13 +23,13 @@ SRXDesk isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
 
 | Layihə | Tip | Təyinat |
 |--------|-----|---------|
-| **SRXDesk.Relay**  | ASP.NET Core 9 SignalR hub (`/remotehub`) | Mərkəzi siqnal serveri (kəşf + icazə) |
-| **SRXDesk.Client** | Konsol (net9.0-windows, WinExe/səssiz) | User PC-lərinə GPO ilə yayılır; icazədən sonra ekran serveri |
-| **SRXDesk.Server** | Konsol + WinForms (tək exe) | Adminin menyusu; Viewer-i öz içində açır |
-| **SRXDesk.Viewer** | Kitabxana (WinForms) | Uzaq ekran pəncərəsi (Server-ə daxildir, ayrıca exe deyil) |
-| **SRXDesk.Core**   | Kitabxana | Ekran tutma, kadr protokolu, stream server/receiver, input |
-| **SRXDesk.Host**   | Konsol (test) | Streaming/protokol testləri: `serve`/`selftest`/`inputtest`/`relaytest` |
-| **SRXDesk.CaptureProbe** | Konsol (test) | Ekran tutma testi |
+| **DXDesk.Relay**  | ASP.NET Core 9 SignalR hub (`/remotehub`) | Mərkəzi siqnal serveri (kəşf + icazə) |
+| **DXDesk.Client** | Konsol (net9.0-windows, WinExe/səssiz) | User PC-lərinə GPO ilə yayılır; icazədən sonra ekran serveri |
+| **DXDesk.Server** | Konsol + WinForms (tək exe) | Adminin menyusu; Viewer-i öz içində açır |
+| **DXDesk.Viewer** | Kitabxana (WinForms) | Uzaq ekran pəncərəsi (Server-ə daxildir, ayrıca exe deyil) |
+| **DXDesk.Core**   | Kitabxana | Ekran tutma, kadr protokolu, stream server/receiver, input |
+| **DXDesk.Host**   | Konsol (test) | Streaming/protokol testləri: `serve`/`selftest`/`inputtest`/`relaytest` |
+| **DXDesk.CaptureProbe** | Konsol (test) | Ekran tutma testi |
 
 ## Arxitektura
 
@@ -51,7 +51,7 @@ SRXDesk isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
 platformadan asılı deyil):
 
 ```bash
-cd src/SRXDesk.Relay
+cd src/DXDesk.Relay
 dotnet run
 ```
 
@@ -65,11 +65,11 @@ Standart: `http://0.0.0.0:5100` (hub: `/remotehub`). Portu `appsettings.json` �
 Self-contained tək fayl (klientdə .NET tələb olunmur):
 
 ```bash
-cd src/SRXDesk.Client
+cd src/DXDesk.Client
 dotnet publish -c Release -r win-x64
 ```
 
-Nəticə: `bin/Release/net9.0-windows/win-x64/publish/SRXDesk.Client.exe` (səssiz,
+Nəticə: `bin/Release/net9.0-windows/win-x64/publish/DXDesk.Client.exe` (səssiz,
 konsolsuz WinExe) + `appsettings.json`.
 
 Yaymadan əvvəl `appsettings.json`-u tənzimləyin:
@@ -82,18 +82,18 @@ Yaymadan əvvəl `appsettings.json`-u tənzimləyin:
 ```
 
 Hər iki faylı NETLOGON-a kopyalayıb GPO ilə avtomatik başladın
-(`deploy/install-client.bat` startup skripti və ya `deploy/SRXDesk-Client.xml`
+(`deploy/install-client.bat` startup skripti və ya `deploy/DXDesk-Client.xml`
 zamanlanmış tapşırıq). Client-lərdə **7000 (stream) portu firewall-da açıq** olmalıdır.
 
 ---
 
 ## 3. Admin (server) alətini istifadə etmək
 
-Admin maşınında yalnız **tək fayl** lazımdır: `SRXDesk.Server.exe`
+Admin maşınında yalnız **tək fayl** lazımdır: `DXDesk.Server.exe`
 (+ kiçik `appsettings.json`). Viewer onun içindədir. Tək-fayl yayım:
 
 ```bash
-dotnet publish src/SRXDesk.Server/SRXDesk.Server.csproj -c Release -r win-x64
+dotnet publish src/DXDesk.Server/DXDesk.Server.csproj -c Release -r win-x64
 ```
 
 `appsettings.json` → `Relay:Url` Ubuntu relay-ə işarə etməlidir (məs. `http://10.30.2.11:5100/remotehub`).
@@ -113,17 +113,17 @@ Menyu:
 
 ---
 
-## Test rejimləri (SRXDesk.Host)
+## Test rejimləri (DXDesk.Host)
 
 ```bash
 # Bir maşında birbaşa streaming + idarə (relay olmadan):
-SRXDesk.Host.exe serve 7000
-SRXDesk.Viewer.exe --connect 127.0.0.1 7000
+DXDesk.Host.exe serve 7000
+DXDesk.Viewer.exe --connect 127.0.0.1 7000
 
 # Avtomatik testlər:
-SRXDesk.Host.exe selftest    # şəbəkə yayımı
-SRXDesk.Host.exe inputtest   # input protokolu
-SRXDesk.Host.exe relaytest   # relay siqnal axını (relay işləməlidir)
+DXDesk.Host.exe selftest    # şəbəkə yayımı
+DXDesk.Host.exe inputtest   # input protokolu
+DXDesk.Host.exe relaytest   # relay siqnal axını (relay işləməlidir)
 ```
 
 ## Relay-i Ubuntu-da Docker ilə qaldırmaq
@@ -140,7 +140,7 @@ sudo systemctl enable --now docker
 # 2) Firewall — 5100 portu
 sudo ufw allow 5100/tcp
 
-# 3) Layihəni serverə köçürün (məs. src/SRXDesk.Relay + deploy/relay),
+# 3) Layihəni serverə köçürün (məs. src/DXDesk.Relay + deploy/relay),
 #    sonra relay-i qaldırın:
 cd deploy/relay
 sudo docker compose up -d --build
