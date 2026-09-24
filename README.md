@@ -9,14 +9,14 @@ RDP-dən fərqi: RDP istifadəçini sessiyadan çıxarır və çoxlarında bağl
 DXDesk isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
 
 ```
-┌────────────────┐  RequestConnection  ┌───────────────┐  ConnectionRequest  ┌─────────────────┐
-│ Server (admin) │ ──────────────────► │  Relay (hub)  │ ──────────────────► │ Client (user PC)│
+┌────────────────┐  RequestConnection  ┌───────────────┐  ConnectionRequest  ┌──────────────────┐
+│ Server (admin) │ ──────────────────► │  Relay (hub)  │ ──────────────────► │ Client (user PC) │
 │                │ ◄────────────────── │  /remotehub   │ ◄────────────────── │  icazə MessageBox│
-└───────┬────────┘  ConnectionResponse └───────────────┘  ConnectionResponse └────────┬────────┘
+└───────┬────────┘  ConnectionResponse └───────────────┘  ConnectionResponse └────────┬─────────┘
         │ (accepted + IP + port)                                    (Bəli → ekran serveri)
         │                                                                             │
         │            birbaşa TCP: ekran kadrları + input (siçan/klaviatura)           │
-        └─────────────────────────── Viewer  ◄──────────────────────────────────────┘
+        └─────────────────────────── Viewer  ◄────────────────────────────────────────┘
 ```
 
 ## Layihələr
