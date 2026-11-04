@@ -15,3 +15,9 @@ services:
       # Eyni dəyəri admin Server appsettings.json-da da yazın. Boş buraxsanız
       # (dev) yoxlama söndürülür. Produksiyada mütləq güclü açar qoyun.
       - Admin__Secret=${MILLA_ADMIN_SECRET:-}
+      # Kompüterlərin qeydiyyat açarı (Service appsettings.json -> Relay:ClientSecret ilə eyni).
+      - Client__Secret=${MILLA_CLIENT_SECRET:-}
+      - Audit__Path=/app/audit/audit.log
+    volumes:
+      # Audit jurnalı konteyner yenilənəndə itməsin.
+      - ./audit:/app/audit

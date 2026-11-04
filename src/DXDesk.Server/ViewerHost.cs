@@ -7,11 +7,11 @@ namespace DXDesk.Server;
 [SupportedOSPlatform("windows")]
 internal static class ViewerHost
 {
-    public static void Launch(string host, int port)
+    public static void Launch(string host, int port, string? sessionToken)
     {
         var t = new Thread(() =>
         {
-            try { ViewerSession.RunRemote(host, port); }
+            try { ViewerSession.RunRemote(host, port, sessionToken); }
             catch (Exception ex) { Console.WriteLine($"Viewer xətası: {ex.Message}"); }
         })
         {

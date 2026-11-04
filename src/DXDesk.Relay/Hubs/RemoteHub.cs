@@ -1,79 +1,95 @@
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR;
+using System.Security.Cryptography;
 using DXDesk.Relay.Services;
 
 namespace DXDesk.Relay.Hubs;
 
 /// <summary>
 /// Admin aləti (DXDesk.Server) ilə son istifadəçi kompüterləri
-/// (DXDesk.Client) arasında relay.
+/// (DXDesk.Service/Client) arasında relay.
 /// </summary>
 public sealed class RemoteHub : Hub
 {
     private readonly ClientRegistry _registry;
+    private readonly RelaySecurity _security;
+    private readonly AuditLog _audit;
     private readonly ILogger<RemoteHub> _logger;
-    private readonly string? _adminSecret;
 
-    public RemoteHub(ClientRegistry registry, ILogger<RemoteHub> logger, IConfiguration config)
+    public RemoteHub(ClientRegistry registry, RelaySecurity security, AuditLog audit, ILogger<RemoteHub> logger)
     {
         _registry = registry;
+        _security = security;
+        _audit = audit;
         _logger = logger;
-        _adminSecret = config["Admin:Secret"];
     }
 
-    /// <summary>
-    /// Admin əmrləri üçün token yoxlaması. Konfiqurasiyada Admin:Secret varsa,
-    /// yalnız düzgün token qəbul olunur (yalnız Sulxay-ın aləti əmr verə bilsin).
-    /// </summary>
-    private void RequireAdmin(string? token)
+    /// <summary>Admin əmrləri üçün token yoxlaması.</summary>
+    private void RequireAdmin(string? token, string action, string? target = null)
     {
-        if (!string.IsNullOrEmpty(_adminSecret) &&
-            !string.Equals(token, _adminSecret, StringComparison.Ordinal))
+        if (!_security.IsAdmin(token))
         {
-            _logger.LogWarning("İcazəsiz admin əmri cəhdi: {ConnectionId}", Context.ConnectionId);
+            _logger.LogWarning("İcazəsiz admin əmri cəhdi: {Action} {ConnectionId}", action, Context.ConnectionId);
+            _audit.Write("admin_denied", ResolveRemoteIp(), target, new { action });
             throw new HubException("İcazə yoxdur (yanlış admin token).");
         }
     }
 
     /// <summary>Kliyent qoşulan kimi öz hostname-i ilə qeydiyyatdan keçir.</summary>
-    public async Task RegisterClient(string hostname)
+    public async Task RegisterClient(string hostname, string? clientSecret)
     {
         if (string.IsNullOrWhiteSpace(hostname))
         {
             throw new HubException("Hostname boş ola bilməz.");
         }
 
-        var client = new ClientInfo(
-            hostname.Trim(),
-            Context.ConnectionId,
-            ResolveRemoteIp(),
-            DateTimeOffset.UtcNow);
+        var ip = ResolveRemoteIp();
+        if (!_security.IsValidClient(clientSecret))
+        {
+            _logger.LogWarning("Yanlış client açarı: {Hostname} ({Ip})", hostname, ip);
+            _audit.Write("client_denied", ip, hostname.Trim(), new { reason = "secret" });
+            throw new HubException("İcazə yoxdur (yanlış client açarı).");
+        }
 
-        _registry.AddOrUpdateClient(client);
+        var client = new ClientInfo(hostname.Trim(), Context.ConnectionId, ip, DateTimeOffset.UtcNow);
+        if (!_registry.TryAddOrUpdateClient(client))
+        {
+            _logger.LogWarning("Hostname artıq başqa IP-dən onlayndır: {Hostname} ({Ip})", client.Hostname, ip);
+            _audit.Write("client_denied", ip, client.Hostname, new { reason = "hostname_in_use" });
+            throw new HubException("Bu hostname artıq başqa ünvandan qoşulub.");
+        }
+
         _logger.LogInformation("Kliyent qoşuldu: {Hostname} ({Ip})", client.Hostname, client.IpAddress);
-
         await BroadcastClientsAsync();
     }
 
     /// <summary>Admin aləti qoşulanda çağırır — onlayn siyahı yeniliklərini almaq üçün.</summary>
     public async Task RegisterAdmin(string token)
     {
-        RequireAdmin(token);
+        RequireAdmin(token, "register_admin");
         _registry.AddAdmin(Context.ConnectionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, ClientRegistry.AdminGroup);
         _logger.LogInformation("Admin qoşuldu: {ConnectionId}", Context.ConnectionId);
+        _audit.Write("admin_login", ResolveRemoteIp());
 
         await Clients.Caller.SendAsync("ClientsChanged", _registry.GetClients());
     }
 
-    /// <summary>Onlayn kliyentlərin siyahısı.</summary>
-    public IReadOnlyList<ClientInfo> GetOnlineClients() => _registry.GetClients();
+    /// <summary>Onlayn kliyentlərin siyahısı (yalnız qeydiyyatlı admin üçün).</summary>
+    public IReadOnlyList<ClientInfo> GetOnlineClients()
+    {
+        if (!_registry.IsAdmin(Context.ConnectionId))
+        {
+            throw new HubException("İcazə yoxdur (əvvəlcə RegisterAdmin).");
+        }
+        return _registry.GetClients();
+    }
 
     /// <summary>Admin çağırır: göstərilən kompüterə qoşulma sorğusu göndər.</summary>
     public async Task<RequestResult> RequestConnection(string token, string targetHostname)
     {
-        RequireAdmin(token);
+        RequireAdmin(token, "connect", targetHostname);
         if (string.IsNullOrWhiteSpace(targetHostname))
         {
             return new RequestResult(false, "Hostname boş ola bilməz.", null, null);
@@ -85,9 +101,12 @@ public sealed class RemoteHub : Hub
             return new RequestResult(false, $"'{targetHostname.Trim()}' onlayn deyil.", null, null);
         }
 
-        _registry.SetPendingRequest(client.Hostname, Context.ConnectionId);
-        await Clients.Client(client.ConnectionId).SendAsync("ConnectionRequest", client.Hostname);
+        // Bir dəfəlik sessiya açarı: agent yalnız bu açarı göndərən viewer-i qəbul edir.
+        var sessionToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        _registry.SetPendingRequest(client.Hostname, Context.ConnectionId, sessionToken);
+        await Clients.Client(client.ConnectionId).SendAsync("ConnectionRequest", client.Hostname, sessionToken);
         _logger.LogInformation("Qoşulma sorğusu göndərildi: {Hostname}", client.Hostname);
+        _audit.Write("connect_request", ResolveRemoteIp(), client.Hostname, new { clientIp = client.IpAddress });
 
         return new RequestResult(true, null, client.Hostname, client.IpAddress);
     }
@@ -98,7 +117,7 @@ public sealed class RemoteHub : Hub
     /// </summary>
     public async Task<RequestResult> LaunchElevated(string token, string targetHostname, string program, string arguments)
     {
-        RequireAdmin(token);
+        RequireAdmin(token, "launch_elevated", targetHostname);
         if (string.IsNullOrWhiteSpace(targetHostname) || string.IsNullOrWhiteSpace(program))
         {
             return new RequestResult(false, "Hostname və proqram tələb olunur.", null, null);
@@ -112,37 +131,44 @@ public sealed class RemoteHub : Hub
 
         await Clients.Client(client.ConnectionId).SendAsync("LaunchElevated", program, arguments ?? string.Empty);
         _logger.LogInformation("Elevated launch göndərildi: {Hostname} -> {Program}", client.Hostname, program);
+        _audit.Write("launch_elevated", ResolveRemoteIp(), client.Hostname, new { program, arguments });
         return new RequestResult(true, null, client.Hostname, client.IpAddress);
     }
 
-    /// <summary>Kliyent çağırır: istifadəçi sorğunu qəbul etdi / rədd etdi.</summary>
-    public async Task ConnectionResponse(string hostname, bool accepted, int streamPort)
+    /// <summary>
+    /// Kliyent/agent çağırır: istifadəçi sorğunu qəbul etdi / rədd etdi.
+    /// Cavab yalnız sorğudakı sessiya açarı ilə qəbul olunur (saxta cavab olmasın).
+    /// </summary>
+    public async Task ConnectionResponse(string hostname, bool accepted, int streamPort, string sessionToken)
     {
-        // Saxtakarlığın qarşısını almaq üçün qeydiyyatdakı adı üstün tuturuq.
-        var client = _registry.GetByConnectionId(Context.ConnectionId);
-        var effectiveHostname = client?.Hostname ?? hostname?.Trim() ?? string.Empty;
+        var sender = _registry.GetByConnectionId(Context.ConnectionId);
+        var effectiveHostname = sender?.Hostname ?? hostname?.Trim() ?? string.Empty;
+        var ip = ResolveRemoteIp();
 
-        if (string.IsNullOrEmpty(effectiveHostname))
+        var pending = string.IsNullOrEmpty(effectiveHostname)
+            ? null
+            : _registry.TakePendingRequest(effectiveHostname, sessionToken);
+        if (pending is null)
         {
-            throw new HubException("Qeydiyyatdan keçməmiş kliyent cavab göndərə bilməz.");
+            _logger.LogWarning("Etibarsız cavab (açar uyğun deyil və ya vaxtı keçib): {Hostname} ({Ip})", effectiveHostname, ip);
+            _audit.Write("response_denied", ip, effectiveHostname);
+            throw new HubException("Etibarsız və ya vaxtı keçmiş sorğu.");
         }
 
-        var message = new ConnectionResponseMessage(effectiveHostname, accepted, client?.IpAddress, streamPort);
-        _logger.LogInformation(
-            "Cavab alındı: {Hostname} -> {Result}",
+        // Agent relay-ə ayrıca (qeydiyyatsız) bağlantı ilə cavab verir — IP-ni reyestrdən götürürük.
+        var registered = _registry.GetByHostname(effectiveHostname);
+        var message = new ConnectionResponseMessage(
             effectiveHostname,
-            accepted ? "QƏBUL" : "RƏDD");
+            accepted,
+            registered?.IpAddress ?? ip,
+            streamPort,
+            accepted ? pending.Token : null);
 
-        var adminConnectionId = _registry.TakePendingRequest(effectiveHostname);
-        if (adminConnectionId is not null)
-        {
-            await Clients.Client(adminConnectionId).SendAsync("ConnectionResponse", message);
-        }
-        else
-        {
-            // Sorğunu göndərən admin artıq yoxdursa, bütün adminlərə bildiririk.
-            await Clients.Group(ClientRegistry.AdminGroup).SendAsync("ConnectionResponse", message);
-        }
+        _logger.LogInformation("Cavab alındı: {Hostname} -> {Result}", effectiveHostname, accepted ? "QƏBUL" : "RƏDD");
+        _audit.Write(accepted ? "connect_accepted" : "connect_rejected", ip, effectiveHostname);
+
+        // Açar yalnız sorğunu göndərən adminə gedir.
+        await Clients.Client(pending.AdminConnectionId).SendAsync("ConnectionResponse", message);
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

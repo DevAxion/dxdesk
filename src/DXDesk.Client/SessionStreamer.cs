@@ -33,7 +33,7 @@ public sealed class SessionStreamer
     public int Port => _port;
 
     /// <summary>Yeni sessiya başladır (əvvəlkini dayandırır). Dinlədiyi portu qaytarır.</summary>
-    public int Begin(TimeSpan noConnectTimeout)
+    public int Begin(TimeSpan noConnectTimeout, string sessionToken)
     {
         Stop();
         var cts = new CancellationTokenSource();
@@ -41,7 +41,7 @@ public sealed class SessionStreamer
         _hadViewer = false;
         _done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var server = new ScreenStreamServer(_port, _targetFps, _tileSize, _log);
+        var server = new ScreenStreamServer(_port, _targetFps, _tileSize, _log, sessionToken);
         server.ViewersChanged += count =>
         {
             if (count > 0)

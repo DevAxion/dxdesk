@@ -198,3 +198,18 @@ Hazırkı versiya **daxili LAN** üçün nəzərdə tutulub:
 
 - Relay: .NET 9 (ASP.NET Core), Windows və ya Linux.
 - Server/Viewer/Client: net9.0-windows. Client self-contained yayımda runtime tələb etmir.
+
+## Təhlükəsizlik
+
+| Nə | Necə |
+|----|------|
+| **Admin açarı** | Relay-də `Admin:Secret` (Docker: `MILLA_ADMIN_SECRET`) **məcburidir** — boş/zəif (min 16 simvol) olsa relay produksiyada başlamır. Server `appsettings.json` → `Admin:Secret` eyni olmalıdır. |
+| **Kompüter açarı** | Relay `Client:Secret` (Docker: `MILLA_CLIENT_SECRET`) = Service/Client `Relay:ClientSecret`. Təyin olunanda yalnız açarı bilən kompüter qeydiyyatdan keçə bilir. Eyni hostname başqa IP-dən onlayndırsa, ikinci qeydiyyat rədd edilir. |
+| **Sessiya açarı** | Hər qoşulma sorğusu üçün relay bir dəfəlik təsadüfi açar yaradır. Agent 7000 portunda yalnız bu açarı göndərən viewer-i qəbul edir; açar yalnız sorğunu göndərən adminə verilir. Agentin "qəbul etdi" cavabı da bu açarla yoxlanır. |
+| **SYSTEM proqram siyasəti** | Service `appsettings.json` → `Launch:Enabled` (false = tam bağlı) və `Launch:AllowedPrograms` (məs. `["msiexec.exe", "C:\Deploy\*"]`). Siyahı doludursa, relay ələ keçsə belə kompüter yalnız bunları açır. |
+| **Audit jurnalı** | Relay hər girişi, qoşulmanı, rəddi və SYSTEM əmrini `audit/audit.log`-a (JSON Lines) yazır. Docker-də `deploy/relay/audit/` qovluğunda saxlanır. |
+| **`/api/clients`** | Yalnız `X-Admin-Token` başlığı ilə. |
+
+> Hələ edilməyib: trafikin **şifrələnməsi** (TLS) — növbəti addım.
+
+**Yeniləmə qaydası:** protokol dəyişib — Relay, Service, Client və Server **eyni vaxtda** yenilənməlidir.

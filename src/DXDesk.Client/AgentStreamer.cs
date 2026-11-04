@@ -20,7 +20,7 @@ namespace DXDesk.Client;
 [SupportedOSPlatform("windows")]
 public static class AgentStreamer
 {
-    public static void Run(int port, int targetFps, int tileSize, TimeSpan noConnectTimeout, Action<string> log)
+    public static void Run(int port, int targetFps, int tileSize, TimeSpan noConnectTimeout, string sessionToken, Action<string> log)
     {
         var listener = new TcpListener(IPAddress.Any, port);
         listener.Start();
@@ -28,9 +28,32 @@ public static class AgentStreamer
 
         try
         {
-            if (!WaitForClient(listener, noConnectTimeout, out var client) || client is null)
+            // Yalnız düzgün sessiya açarını göndərən viewer qəbul olunur.
+            // Yanlış cəhdlər bağlanır, vaxt bitənə qədər (max 5 cəhd) gözləməyə davam edilir.
+            var deadline = DateTime.UtcNow + noConnectTimeout;
+            TcpClient? client = null;
+            for (var attempt = 0; attempt < 5 && client is null; attempt++)
             {
-                log("Viewer vaxtında qoşulmadı — agent dayanır.");
+                var left = deadline - DateTime.UtcNow;
+                if (left <= TimeSpan.Zero || !WaitForClient(listener, left, out var candidate) || candidate is null)
+                {
+                    break;
+                }
+
+                if (SessionAuth.Verify(candidate.GetStream(), sessionToken))
+                {
+                    client = candidate;
+                }
+                else
+                {
+                    log($"Yanlış sessiya açarı, rədd edildi: {candidate.Client.RemoteEndPoint}");
+                    candidate.Dispose();
+                }
+            }
+
+            if (client is null)
+            {
+                log("Düzgün açarlı viewer vaxtında qoşulmadı — agent dayanır.");
                 return;
             }
 

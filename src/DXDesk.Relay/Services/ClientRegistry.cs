@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace DXDesk.Relay.Services;
 
@@ -21,7 +23,11 @@ public sealed record ConnectionResponseMessage(
     string Hostname,
     bool Accepted,
     string? IpAddress,
-    int StreamPort);
+    int StreamPort,
+    string? SessionToken = null);
+
+/// <summary>Gözləyən qoşulma sorğusu: kim göndərib, hansı açarla, nə vaxt.</summary>
+public sealed record PendingRequest(string AdminConnectionId, string Token, DateTimeOffset CreatedAtUtc);
 
 /// <summary>
 /// Onlayn kliyentlərin (hostname -> connectionId) və admin bağlantılarının
@@ -41,10 +47,30 @@ public sealed class ClientRegistry
         new(StringComparer.Ordinal);
 
     /// <summary>hostname -> sorğunu göndərən admin connectionId.</summary>
-    private readonly ConcurrentDictionary<string, string> _pendingRequests =
+    private readonly ConcurrentDictionary<string, PendingRequest> _pendingRequests =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public void AddOrUpdateClient(ClientInfo client)
+    /// <summary>Sorğu bu müddətdən sonra etibarsızdır.</summary>
+    public static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Kliyenti qeydiyyata alır. Eyni hostname artıq BAŞQA IP-dən onlayndırsa,
+    /// rədd edir (false) — başqasının adını "oğurlamaq" olmasın.
+    /// </summary>
+    public bool TryAddOrUpdateClient(ClientInfo client)
+    {
+        if (_clientsByHostname.TryGetValue(client.Hostname, out var existing) &&
+            !string.Equals(existing.ConnectionId, client.ConnectionId, StringComparison.Ordinal) &&
+            !string.Equals(existing.IpAddress, client.IpAddress, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        AddOrUpdateClient(client);
+        return true;
+    }
+
+    private void AddOrUpdateClient(ClientInfo client)
     {
         // Eyni hostname yenidən qoşulubsa, köhnə connectionId-ni təmizləyirik.
         if (_clientsByHostname.TryGetValue(client.Hostname, out var previous) &&
@@ -97,10 +123,28 @@ public sealed class ClientRegistry
 
     public bool IsAdmin(string connectionId) => _admins.ContainsKey(connectionId);
 
-    public void SetPendingRequest(string hostname, string adminConnectionId) =>
-        _pendingRequests[hostname] = adminConnectionId;
+    public void SetPendingRequest(string hostname, string adminConnectionId, string token) =>
+        _pendingRequests[hostname] = new PendingRequest(adminConnectionId, token, DateTimeOffset.UtcNow);
 
-    /// <summary>Gözləyən sorğunu götürür və reyestrdən silir.</summary>
-    public string? TakePendingRequest(string hostname) =>
-        _pendingRequests.TryRemove(hostname, out var adminConnectionId) ? adminConnectionId : null;
+    /// <summary>
+    /// Gözləyən sorğunu YALNIZ açar uyğun gəlirsə və vaxtı keçməyibsə götürür.
+    /// Beləliklə saxta "qəbul etdi" cavabı göndərmək mümkün olmur.
+    /// </summary>
+    public PendingRequest? TakePendingRequest(string hostname, string? token)
+    {
+        if (string.IsNullOrEmpty(token) || !_pendingRequests.TryGetValue(hostname, out var pending))
+        {
+            return null;
+        }
+
+        var match = CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(pending.Token), Encoding.ASCII.GetBytes(token));
+        if (!match)
+        {
+            return null;
+        }
+
+        _pendingRequests.TryRemove(hostname, out _);
+        return DateTimeOffset.UtcNow - pending.CreatedAtUtc <= PendingLifetime ? pending : null;
+    }
 }

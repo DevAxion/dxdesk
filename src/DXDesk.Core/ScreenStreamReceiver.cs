@@ -15,11 +15,16 @@ public sealed class ScreenStreamReceiver : IDisposable
     private readonly CancellationTokenSource _sendCts = new();
     private Task? _sendLoop;
 
-    public async Task ConnectAsync(string host, int port, CancellationToken ct = default)
+    /// <param name="sessionToken">Relay-in verdiyi bir dəfəlik açar (test rejimində boş ola bilər).</param>
+    public async Task ConnectAsync(string host, int port, CancellationToken ct = default, string? sessionToken = null)
     {
         await _client.ConnectAsync(host, port, ct);
         _client.NoDelay = true;
         _stream = _client.GetStream();
+        if (!string.IsNullOrEmpty(sessionToken))
+        {
+            await SessionAuth.SendAsync(_stream, sessionToken, ct);
+        }
         _sendLoop = Task.Run(() => SendLoopAsync(_sendCts.Token));
     }
 

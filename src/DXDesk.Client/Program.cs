@@ -13,6 +13,7 @@ var config = new ConfigurationBuilder()
     .Build();
 
 var relayUrl = config["Relay:Url"] ?? "http://localhost:5100/remotehub";
+var clientSecret = config["Relay:ClientSecret"] ?? "";
 var reconnectDelay = TimeSpan.FromSeconds(
     int.TryParse(config["Relay:ReconnectDelaySeconds"], out var s) && s > 0 ? s : 10);
 
@@ -22,14 +23,15 @@ var tileSize = int.TryParse(config["Stream:TileSize"], out var ts) && ts > 0 ? t
 
 // ---- Agent rejimi ----
 // Xidmət (DXDesk.Service) bunu aktiv sessiyada SYSTEM kimi buraxır:
-//   DXDesk.Client.exe --agent <relayUrl> <hostname> <port>
+//   DXDesk.Client.exe --agent <relayUrl> <hostname> <port> <sessiyaAçarı>
 // SYSTEM integrity olduğu üçün elevated pəncərələri də idarə edə bilir.
-if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnoreCase))
+if (args.Length >= 5 && args[0].Equals("--agent", StringComparison.OrdinalIgnoreCase))
 {
     NativeMethods.HideConsoleWindow();
     var agentRelay = args[1];
     var agentHost = args[2];
     var agentPort = int.TryParse(args[3], out var ap) && ap > 0 ? ap : streamPort;
+    var agentToken = args[4];
 
     // Agent fayl loqu (SYSTEM/səssiz olduğu üçün konsol görünmür).
     var agentLogPath = Path.Combine(
@@ -51,7 +53,7 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     {
         var agentThread = new Thread(() =>
         {
-            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(30), AgentLog); }
+            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(30), agentToken, AgentLog); }
             finally { done.Set(); }
         })
         {
@@ -66,7 +68,7 @@ if (args.Length >= 4 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     try
     {
         await conn.StartAsync();
-        await conn.InvokeAsync("ConnectionResponse", agentHost, accepted, accepted ? agentPort : 0);
+        await conn.InvokeAsync("ConnectionResponse", agentHost, accepted, accepted ? agentPort : 0, agentToken);
     }
     catch (Exception ex)
     {
@@ -104,14 +106,14 @@ var connection = new HubConnectionBuilder()
     .Build();
 
 // Relay-dən qoşulma sorğusu gələndə MessageBox göstəririk.
-connection.On<string>("ConnectionRequest", async requestedHostname =>
+connection.On<string, string>("ConnectionRequest", async (requestedHostname, sessionToken) =>
 {
     var accepted = ShowRequestDialog();
     var port = 0;
     if (accepted)
     {
         // İcazə verildi: bu sessiya üçün ekran serverini başladırıq.
-        port = session.Begin(noConnectTimeout: TimeSpan.FromSeconds(30));
+        port = session.Begin(TimeSpan.FromSeconds(30), sessionToken);
         Log($"İcazə verildi. Ekran serveri {port} portunda başladı.");
     }
     else
@@ -121,7 +123,7 @@ connection.On<string>("ConnectionRequest", async requestedHostname =>
 
     try
     {
-        await connection.InvokeAsync("ConnectionResponse", hostname, accepted, port, cts.Token);
+        await connection.InvokeAsync("ConnectionResponse", hostname, accepted, port, sessionToken, cts.Token);
     }
     catch (Exception ex)
     {
@@ -207,7 +209,7 @@ async Task SafeRegisterAsync()
 {
     try
     {
-        await connection.InvokeAsync("RegisterClient", hostname, cts.Token);
+        await connection.InvokeAsync("RegisterClient", hostname, clientSecret, cts.Token);
     }
     catch (Exception ex)
     {

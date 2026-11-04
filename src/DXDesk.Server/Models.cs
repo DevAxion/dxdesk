@@ -19,4 +19,5 @@ public sealed record ConnectionResponseMessage(
     string Hostname,
     bool Accepted,
     string? IpAddress,
-    int StreamPort);
+    int StreamPort,
+    string? SessionToken = null);

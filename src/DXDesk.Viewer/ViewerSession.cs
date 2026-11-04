@@ -13,7 +13,7 @@ public static class ViewerSession
     private static bool _initialized;
 
     /// <summary>Verilmiş host:port-a qoşulub uzaq ekranı göstərir (bloklayır).</summary>
-    public static void RunRemote(string host, int port)
+    public static void RunRemote(string host, int port, string? sessionToken = null)
     {
         if (!_initialized)
         {
@@ -45,7 +45,7 @@ public static class ViewerSession
                 try
                 {
                     using var receiver = new ScreenStreamReceiver();
-                    await receiver.ConnectAsync(host, port, cts.Token);
+                    await receiver.ConnectAsync(host, port, cts.Token, sessionToken);
                     active = receiver;
                     using var decoder = new TileFrameDecoder();
                     await receiver.ReceiveLoopAsync(payload =>

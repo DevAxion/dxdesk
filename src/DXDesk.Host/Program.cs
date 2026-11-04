@@ -22,6 +22,9 @@ switch (mode)
     case "relaytest":
         await RelayTestAsync(args.Length > 1 ? args[1] : "http://localhost:5100/remotehub", cts.Token);
         break;
+    case "authtest":
+        await AuthTestAsync(cts.Token);
+        break;
     case "tiletest":
         await TileTestAsync(cts.Token);
         break;
@@ -131,10 +134,10 @@ static async Task RelayTestAsync(string relayUrl, CancellationToken ct)
 
     var responseTcs = new TaskCompletionSource<(string host, bool accepted, int port)>();
 
-    client.On<string>("ConnectionRequest", async h =>
+    client.On<string, string>("ConnectionRequest", async (h, sessionToken) =>
     {
         Log($"[client] Sorğu alındı: {h} -> avtomatik QƏBUL");
-        await client.InvokeAsync("ConnectionResponse", testHost, true, testPort);
+        await client.InvokeAsync("ConnectionResponse", testHost, true, testPort, sessionToken);
     });
 
     admin.On<System.Text.Json.JsonElement>("ConnectionResponse", msg =>
@@ -149,15 +152,15 @@ static async Task RelayTestAsync(string relayUrl, CancellationToken ct)
     await admin.StartAsync(ct);
     Log("Hər iki bağlantı quruldu.");
 
-    await client.InvokeAsync("RegisterClient", testHost, cancellationToken: ct);
-    await admin.InvokeAsync("RegisterAdmin", "", cancellationToken: ct);
+    await client.InvokeAsync("RegisterClient", testHost, Environment.GetEnvironmentVariable("DXDESK_CLIENT_SECRET") ?? "", cancellationToken: ct);
+    await admin.InvokeAsync("RegisterAdmin", Environment.GetEnvironmentVariable("DXDESK_ADMIN_SECRET") ?? "", cancellationToken: ct);
 
     var online = await admin.InvokeAsync<List<Dictionary<string, System.Text.Json.JsonElement>>>("GetOnlineClients", ct);
     var found = online.Any(c => c.TryGetValue("hostname", out var v) && v.GetString() == testHost);
     Log(found ? $"✓ Onlayn siyahıda '{testHost}' var." : $"✗ '{testHost}' siyahıda YOXDUR.");
 
     Log("Admin qoşulma sorğusu göndərir...");
-    var reqResult = await admin.InvokeAsync<System.Text.Json.JsonElement>("RequestConnection", "", testHost, ct);
+    var reqResult = await admin.InvokeAsync<System.Text.Json.JsonElement>("RequestConnection", Environment.GetEnvironmentVariable("DXDESK_ADMIN_SECRET") ?? "", testHost, ct);
     Log($"  RequestConnection.sent = {reqResult.GetProperty("sent").GetBoolean()}");
 
     var completed = await Task.WhenAny(responseTcs.Task, Task.Delay(5000, ct));
@@ -217,4 +220,35 @@ static async Task TileTestAsync(CancellationToken ct)
 
     Log($"NƏTİCƏ: keyframe {keyBytes / 1024.0:F0} KB, {deltas} delta cəmi {deltaBytes / 1024.0:F0} KB, {empties} boş (dəyişməyən) kadr.");
     Log("✓ Tile encoder/decoder işləyir (statik ekranda delta ≈ 0).");
+}
+
+static async Task AuthTestAsync(CancellationToken ct)
+{
+    const int port = 7098;
+    var token = SessionAuth.NewToken();
+    var server = new ScreenStreamServer(port, targetFps: 10, log: Log, sessionToken: token);
+    using var serverCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    _ = server.RunAsync(serverCts.Token);
+    await Task.Delay(300, ct);
+
+    async Task<int> CountFrames(string? t)
+    {
+        using var r = new ScreenStreamReceiver();
+        await r.ConnectAsync("127.0.0.1", port, ct, t);
+        var n = 0;
+        using var c = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        c.CancelAfter(TimeSpan.FromSeconds(2));
+        try { await r.ReceiveLoopAsync(_ => n++, c.Token); } catch { }
+        return n;
+    }
+
+    var wrong = await CountFrames(SessionAuth.NewToken());
+    var none = await CountFrames(null);
+    var right = await CountFrames(token);
+    serverCts.Cancel();
+
+    Log($"Yanlış açar: {wrong} kadr, açarsız: {none} kadr, düzgün açar: {right} kadr");
+    var ok = wrong == 0 && right > 0;
+    Log(ok ? "AUTHTEST: OK" : "AUTHTEST: XƏTA");
+    Environment.ExitCode = ok ? 0 : 1;
 }

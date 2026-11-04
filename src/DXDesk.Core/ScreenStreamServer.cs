@@ -15,6 +15,7 @@ public sealed class ScreenStreamServer
     private readonly int _targetFps;
     private readonly int _tileSize;
     private readonly Action<string>? _log;
+    private readonly string? _sessionToken;
     private int _activeViewers;
 
     /// <summary>Qoşulu viewer sayı dəyişəndə tetiklenir (sessiya idarəsi üçün).</summary>
@@ -22,8 +23,9 @@ public sealed class ScreenStreamServer
 
     public int ActiveViewers => Volatile.Read(ref _activeViewers);
 
-    public ScreenStreamServer(int port, int targetFps = 12, int tileSize = 128, Action<string>? log = null)
+    public ScreenStreamServer(int port, int targetFps = 12, int tileSize = 128, Action<string>? log = null, string? sessionToken = null)
     {
+        _sessionToken = sessionToken;
         _port = port;
         _targetFps = Math.Clamp(targetFps, 1, 60);
         _tileSize = tileSize;
@@ -57,6 +59,20 @@ public sealed class ScreenStreamServer
     private async Task HandleViewerAsync(TcpClient client, CancellationToken ct)
     {
         var endpoint = client.Client.RemoteEndPoint?.ToString() ?? "?";
+
+        // Sessiya açarı təyin olunubsa, viewer əvvəlcə onu göndərməlidir.
+        if (!string.IsNullOrEmpty(_sessionToken))
+        {
+            var ok = false;
+            try { ok = await SessionAuth.VerifyAsync(client.GetStream(), _sessionToken, ct); } catch { }
+            if (!ok)
+            {
+                _log?.Invoke($"Yanlış sessiya açarı, bağlantı rədd edildi: {endpoint}");
+                client.Dispose();
+                return;
+            }
+        }
+
         var count = Interlocked.Increment(ref _activeViewers);
         ViewersChanged?.Invoke(count);
         _log?.Invoke($"Viewer qoşuldu: {endpoint} (aktiv: {count})");

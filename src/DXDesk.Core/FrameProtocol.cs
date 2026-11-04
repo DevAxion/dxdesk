@@ -22,7 +22,7 @@ public static class FrameProtocol
     }
 
     /// <summary>Bir kadr oxuyur. Axın bağlananda <c>null</c> qaytarır.</summary>
-    public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken ct = default)
+    public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken ct = default, int maxBytes = MaxFrameBytes)
     {
         var header = new byte[4];
         if (!await ReadExactAsync(stream, header, ct))
@@ -31,7 +31,7 @@ public static class FrameProtocol
         }
 
         var length = BinaryPrimitives.ReadInt32BigEndian(header);
-        if (length < 0 || length > MaxFrameBytes)
+        if (length < 0 || length > maxBytes)
         {
             throw new InvalidDataException($"Yanlış kadr ölçüsü: {length}");
         }
