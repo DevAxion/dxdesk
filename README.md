@@ -1,215 +1,214 @@
 # DXDesk
 
-Daxili IT üçün **AnyDesk tipli uzaqdan dəstək aləti** — sıfırdan yazılıb (RDP-siz).
-Admin (IT) bir kompüterə qoşulmaq istəyəndə, həmin kompüterdəki istifadəçiyə
-əvvəlcə Azərbaycanca icazə pəncərəsi çıxır. İstifadəçi **Bəli** deyəndə admin
-onun **ekranını canlı görür və idarə edir** (istifadəçi hər şeyi görür).
+An **AnyDesk-style remote support tool for internal IT**, written from scratch (no RDP).
+When an admin wants to connect to a computer, the user on that computer first sees a
+consent dialog (in Azerbaijani). Once the user clicks **Yes**, the admin **sees the
+live screen and controls it**, and the user can watch everything that happens.
 
-RDP-dən fərqi: RDP istifadəçini sessiyadan çıxarır və çoxlarında bağlıdır.
-DXDesk isə istifadəçinin **əsl (attended) sessiyasını** paylaşır.
+How it differs from RDP: RDP logs the user out of their session and is often disabled.
+DXDesk shares the user's **real (attended) session**.
 
 ```
 ┌────────────────┐  RequestConnection  ┌───────────────┐  ConnectionRequest  ┌──────────────────┐
 │ Server (admin) │ ──────────────────► │  Relay (hub)  │ ──────────────────► │ Client (user PC) │
-│                │ ◄────────────────── │  /remotehub   │ ◄────────────────── │  icazə MessageBox│
+│                │ ◄────────────────── │  /remotehub   │ ◄────────────────── │  consent dialog  │
 └───────┬────────┘  ConnectionResponse └───────────────┘  ConnectionResponse └────────┬─────────┘
-        │ (accepted + IP + port)                                    (Bəli → ekran serveri)
-        │                                                                             │
-        │            birbaşa TCP: ekran kadrları + input (siçan/klaviatura)           │
-        └─────────────────────────── Viewer  ◄────────────────────────────────────────┘
+        │ (accepted + IP + port + session token)                (Yes → screen server)  │
+        │                                                                              │
+        │          direct TCP: screen frames + input (mouse / keyboard / clipboard)    │
+        └─────────────────────────── Viewer  ◄─────────────────────────────────────────┘
 ```
 
-## Layihələr
+## Projects
 
-| Layihə | Tip | Təyinat |
-|--------|-----|---------|
-| **DXDesk.Relay**  | ASP.NET Core 9 SignalR hub (`/remotehub`) | Mərkəzi siqnal serveri (kəşf + icazə) |
-| **DXDesk.Client** | Konsol (net9.0-windows, WinExe/səssiz) | User PC-lərinə GPO ilə yayılır; icazədən sonra ekran serveri |
-| **DXDesk.Server** | Konsol + WinForms (tək exe) | Adminin menyusu; Viewer-i öz içində açır |
-| **DXDesk.Viewer** | Kitabxana (WinForms) | Uzaq ekran pəncərəsi (Server-ə daxildir, ayrıca exe deyil) |
-| **DXDesk.Core**   | Kitabxana | Ekran tutma, kadr protokolu, stream server/receiver, input |
-| **DXDesk.Host**   | Konsol (test) | Streaming/protokol testləri: `serve`/`selftest`/`inputtest`/`relaytest` |
-| **DXDesk.CaptureProbe** | Konsol (test) | Ekran tutma testi |
+| Project | Type | Purpose |
+|---------|------|---------|
+| **DXDesk.Relay**   | ASP.NET Core 9 SignalR hub (`/remotehub`) | Central signaling server (discovery + consent) |
+| **DXDesk.Service** | Windows service (LocalSystem) | Runs on user PCs; launches the agent as SYSTEM in the active session |
+| **DXDesk.Client**  | Console (net9.0-windows, silent WinExe) | The agent: consent dialog, then screen server |
+| **DXDesk.Server**  | Console + WinForms (single exe) | Admin menu; opens the Viewer in-process |
+| **DXDesk.Viewer**  | Library (WinForms) | Remote screen window (bundled in Server, not a separate exe) |
+| **DXDesk.Core**    | Library | Screen capture, frame protocol, stream server/receiver, input, session auth |
+| **DXDesk.Host**    | Console (test) | Streaming/protocol tests: `serve` / `selftest` / `authtest` / `inputtest` / `relaytest` / `tiletest` |
+| **DXDesk.CaptureProbe** | Console (test) | Screen capture test |
 
-## Arxitektura
+## Architecture
 
-- **Siqnal / kəşf / icazə** → SignalR relay (`/remotehub`).
-- **Media (ekran + input)** → Client ilə Viewer arasında **birbaşa TCP** (hazırda LAN).
-  Kadr protokolu: `[4 bayt uzunluq][JPEG]`. Input əks istiqamətdə eyni bağlantıda.
-- İstifadəçi **Bəli** deyəndə Client ekran serverini başladır (sessiyaya bağlı:
-  viewer ayrılanda və ya heç kim qoşulmayanda avtomatik dayanır — icazəsiz
-  qoşulmanın qarşısını alır).
+- **Signaling / discovery / consent** → SignalR relay (`/remotehub`).
+- **Media (screen + input)** → **direct TCP** between Client and Viewer (currently LAN only).
+  Frame protocol: `[4-byte length][payload]`. Input travels back over the same connection.
+- When the user clicks **Yes**, the agent starts a screen server bound to that session:
+  it accepts only the viewer holding the one-time session token, and stops automatically
+  when the viewer disconnects or nobody connects within 30 seconds.
+- The agent runs as **SYSTEM** and follows desktop switches (Default ↔ Secure/Winlogon),
+  so UAC prompts are visible and can be answered remotely.
 
-> **Uzaq/NAT arxası** kompüterlər üçün media axınını relay üzərindən keçirmək və
-> şifrələmə **Mərhələ 6**-da planlaşdırılır. Hazırkı versiya **LAN** üçündür.
+> Tunneling media through the relay for **remote / NAT-ed** machines, plus encryption,
+> is planned for **Phase 6**. The current version is meant for the **LAN**.
 
 ---
 
-## 1. Relay serverini işə salmaq
+## 1. Running the relay server
 
-Şəbəkədə bütün maşınların çata biləcəyi bir serverdə (Windows və ya Linux — relay
-platformadan asılı deyil):
+On a server every machine on the network can reach (Windows or Linux — the relay is
+cross-platform):
 
 ```bash
 cd src/DXDesk.Relay
 dotnet run
 ```
 
-Standart: `http://0.0.0.0:5100` (hub: `/remotehub`). Portu `appsettings.json` →
-`Urls` ilə dəyişin. Yoxlama: `GET /health`, `GET /api/clients`.
+Default: `http://0.0.0.0:5100` (hub: `/remotehub`). Change the port via `Urls` in
+`appsettings.json`. Health checks: `GET /health`, `GET /api/clients` (requires the
+`X-Admin-Token` header).
+
+In Production the relay **will not start** without a strong `Admin:Secret` (see [Security](#security)).
 
 ---
 
-## 2. Klienti GPO ilə yaymaq
+## 2. Deploying to user PCs
 
-Self-contained tək fayl (klientdə .NET tələb olunmur):
+Build self-contained single files (no .NET needed on the client):
 
 ```bash
-cd src/DXDesk.Client
-dotnet publish -c Release -r win-x64
+dotnet publish src/DXDesk.Service/DXDesk.Service.csproj -c Release -r win-x64
+dotnet publish src/DXDesk.Client/DXDesk.Client.csproj -c Release -r win-x64
 ```
 
-Nəticə: `bin/Release/net9.0-windows/win-x64/publish/DXDesk.Client.exe` (səssiz,
-konsolsuz WinExe) + `appsettings.json`.
-
-Yaymadan əvvəl `appsettings.json`-u tənzimləyin:
+Configure `appsettings.json` before deploying:
 
 ```json
 {
-  "Relay": { "Url": "http://RELAY-IP:5100/remotehub", "ReconnectDelaySeconds": 10 },
-  "Stream": { "Port": 7000, "TargetFps": 12 }
+  "Relay": { "Url": "http://RELAY-IP:5100/remotehub", "ClientSecret": "" },
+  "Stream": { "Port": 7000, "TargetFps": 12, "TileSize": 128 },
+  "Launch": { "Enabled": true, "AllowedPrograms": [] }
 }
 ```
 
-Hər iki faylı NETLOGON-a kopyalayıb GPO ilə avtomatik başladın
-(`deploy/install-client.bat` startup skripti və ya `deploy/DXDesk-Client.xml`
-zamanlanmış tapşırıq). Client-lərdə **7000 (stream) portu firewall-da açıq** olmalıdır.
+Put `DXDesk.Service.exe`, `DXDesk.Client.exe` and `appsettings.json` next to
+`deploy/install-service.bat` and run it as administrator (or via GPO). It installs the
+service into `%ProgramData%\DXDesk` and opens **port 7000 (stream)** in the firewall.
+
+For the older client-only mode, use `deploy/install-client.bat` (startup script) or
+`deploy/DXDesk-Client.xml` (scheduled task).
 
 ---
 
-## 3. Admin (server) alətini istifadə etmək
+## 3. Using the admin (server) tool
 
-Admin maşınında yalnız **tək fayl** lazımdır: `DXDesk.Server.exe`
-(+ kiçik `appsettings.json`). Viewer onun içindədir. Tək-fayl yayım:
+The admin machine only needs **one file**: `DXDesk.Server.exe` (+ a small
+`appsettings.json`). The Viewer is built in. Single-file publish:
 
 ```bash
 dotnet publish src/DXDesk.Server/DXDesk.Server.csproj -c Release -r win-x64
 ```
 
-`appsettings.json` → `Relay:Url` Ubuntu relay-ə işarə etməlidir (məs. `http://10.30.2.11:5100/remotehub`).
+`appsettings.json` → `Relay:Url` must point to the relay (e.g. `http://10.30.2.11:5100/remotehub`),
+and `Admin:Secret` must match the relay's secret.
 
-Menyu:
+Menu (the UI is in Azerbaijani):
 
 ```
-  [1] Online olan kompüterlərin siyahısı
-  [2] Kompüterə qoşul (hostname daxil et)
-  [3] Çıx
+  [1] List online computers
+  [2] Connect to a computer (enter hostname)
+  [4] Launch a program as SYSTEM on a remote PC (UAC-free install)
+  [3] Exit
 ```
 
-- **[1]** — relay-dən onlayn kompüterlərin real-vaxt siyahısı.
-- **[2]** — hostname yazırsınız → user-də icazə pəncərəsi çıxır. **Bəli** olanda
-  Viewer avtomatik açılır və uzaq ekranı göstərir; siçan/klaviatura ilə idarə edirsiniz.
-  **Xeyr** olanda "İstifadəçi rədd etdi".
+- **[1]** — real-time list of online computers from the relay.
+- **[2]** — enter a hostname → the user sees the consent dialog. On **Yes** the Viewer
+  opens automatically and shows the remote screen; you control it with mouse and keyboard.
+  On **No** you get "the user declined".
+- **[4]** — runs a program (e.g. `msiexec.exe /i ... /qn`) as SYSTEM in the user's
+  session, subject to the PC's local `Launch` policy.
 
 ---
 
-## Test rejimləri (DXDesk.Host)
+## Test modes (DXDesk.Host)
 
 ```bash
-# Bir maşında birbaşa streaming + idarə (relay olmadan):
+# Direct streaming + control on one machine (no relay):
 DXDesk.Host.exe serve 7000
-DXDesk.Viewer.exe --connect 127.0.0.1 7000
 
-# Avtomatik testlər:
-DXDesk.Host.exe selftest    # şəbəkə yayımı
-DXDesk.Host.exe inputtest   # input protokolu
-DXDesk.Host.exe relaytest   # relay siqnal axını (relay işləməlidir)
+# Automated tests:
+DXDesk.Host.exe selftest    # network streaming + tile decode
+DXDesk.Host.exe authtest    # session token: wrong/no token gets 0 frames, correct token gets frames
+DXDesk.Host.exe inputtest   # input protocol
+DXDesk.Host.exe relaytest   # relay signaling flow (relay must be running;
+                            # set DXDESK_ADMIN_SECRET / DXDESK_CLIENT_SECRET env vars)
 ```
 
-## Relay-i Ubuntu-da Docker ilə qaldırmaq
+## Running the relay on Ubuntu with Docker
 
-Relay cross-platform-dur; Ubuntu server üçün Docker paketi `deploy/relay/`-dədir.
-
-Ubuntu-da (relay serveri):
+The Docker package for an Ubuntu server is in `deploy/relay/`.
 
 ```bash
-# 1) Docker (yoxdursa)
+# 1) Docker (if missing)
 sudo apt update && sudo apt install -y docker.io docker-compose-v2
 sudo systemctl enable --now docker
 
-# 2) Firewall — 5100 portu
+# 2) Firewall — port 5100
 sudo ufw allow 5100/tcp
 
-# 3) Layihəni serverə köçürün (məs. src/DXDesk.Relay + deploy/relay),
-#    sonra relay-i qaldırın:
+# 3) Copy the project to the server (src/DXDesk.Relay + deploy/relay), then:
 cd deploy/relay
-sudo docker compose up -d --build
+export MILLA_ADMIN_SECRET='long-random-secret'
+export MILLA_CLIENT_SECRET='another-long-random-secret'   # optional but recommended
+sudo -E docker compose up -d --build
 
-# 4) Yoxlama
+# 4) Check
 curl http://localhost:5100/health        # {"status":"ok",...}
-sudo docker compose logs -f              # logları izlə
+sudo docker compose logs -f              # follow logs
 
-# 5) Serverin IP-si
+# 5) Server IP
 hostname -I
 ```
 
-Sonra **admin** və **client** `appsettings.json`-larında `Relay:Url`-i Ubuntu
-serverin IP-si ilə əvəz edin, məs. `http://192.168.0.50:5100/remotehub`.
+Then set `Relay:Url` in the **admin** and **client** `appsettings.json` files to the
+Ubuntu server's IP, e.g. `http://192.168.0.50:5100/remotehub`.
 
-> **Şəbəkə qeydi:** Relay yalnız siqnal mübadiləsi edir. Media (ekran + input)
-> hələ də **admin → client birbaşa** gedir. Ona görə admin, bütün client-lər və
-> Ubuntu relay **bir-birinə çatan şəbəkədə** olmalıdır (eyni LAN). Relay client-in
-> gördüyü IP-ni admin-ə ötürür; aralarında NAT olmamalıdır.
+> **Network note:** the relay only handles signaling. Media (screen + input) still goes
+> **directly from admin to client**, so the admin, all clients and the relay must be on
+> a **mutually reachable network** (same LAN). The relay forwards the client IP it sees
+> to the admin, so there must be no NAT between them.
 
-## Bant genişliyi optimizasiyası (tile-diffing)
+## Bandwidth optimization (tile diffing)
 
-Ekran 128×128 xanalara bölünür; hər kadrda yalnız **dəyişən xanalar** göndərilir.
-Ekran tam sabit olanda **heç nə göndərilmir**.
+The screen is split into 128×128 tiles; each frame sends only the **changed tiles**.
+When the screen is completely static, **nothing is sent**.
 
-- İlk kadr (keyframe): ~280–350 KB (bütün ekran, bir dəfə).
-- Sonrakılar: yalnız dəyişən xanalar — adətən **2–6 KB**, sabit ekranda **0**.
-- Nəticə: köhnə tam-kadr üsuluna nəzərən **~95%+ az bant**.
+- First frame (keyframe): ~280–350 KB (whole screen, once).
+- After that: only changed tiles — usually **2–6 KB**, **0** on a static screen.
+- Result: **~95%+ less bandwidth** than sending full frames.
 
-Konfiqurasiya (Client `appsettings.json` → `Stream`): `Port`, `TargetFps`, `TileSize`.
+Configuration (Client `appsettings.json` → `Stream`): `Port`, `TargetFps`, `TileSize`.
 
-## Ekran tutma qeydləri
+## Screen capture notes
 
-- **DPI miqyaslama:** Client Per-Monitor-V2 DPI-aware-dir — 125%/150% miqyaslı
-  ekranlarda tam fiziki çözünürlük tutulur (əks halda yalnız ekranın bir hissəsi
-  görünərdi).
-- **Çoxlu monitor:** Hazırda yalnız **əsas monitor** tutulur. Bütün monitorların
-  tutulması gələcək təkmilləşdirmədir.
+- **DPI scaling:** the Client is Per-Monitor-V2 DPI-aware, so full physical resolution is
+  captured on 125%/150% scaled displays (otherwise only part of the screen would show).
+- **Multiple monitors:** only the **primary monitor** is captured for now.
 
-## Təhlükəsizlik və qalan işlər (hardening)
+## Security
 
-Hazırkı versiya **daxili LAN** üçün nəzərdə tutulub:
+| What | How |
+|------|-----|
+| **Consent** | Every session requires the user's approval. The screen server starts only after "Yes" and stops when the viewer leaves or nobody connects within 30 s. |
+| **Admin secret** | `Admin:Secret` on the relay (Docker: `MILLA_ADMIN_SECRET`) is **mandatory** — if it is empty or weak (min 16 chars), the relay refuses to start in Production. The Server's `appsettings.json` → `Admin:Secret` must match. |
+| **Client secret** | Relay `Client:Secret` (Docker: `MILLA_CLIENT_SECRET`) = Service/Client `Relay:ClientSecret`. When set, only computers that know the secret can register. If a hostname is already online from a different IP, a second registration is rejected. |
+| **Session token** | For each connection request the relay creates a random one-time token. The agent on port 7000 accepts only the viewer that sends this token, and the token goes only to the admin who made the request. The agent's "accepted" reply is verified with the same token. |
+| **SYSTEM launch policy** | Service `appsettings.json` → `Launch:Enabled` (`false` = fully disabled) and `Launch:AllowedPrograms` (e.g. `["msiexec.exe", "C:\\Deploy\\*"]`). If the list is set, the PC only runs those programs, even if the relay is compromised. |
+| **Audit log** | The relay writes every admin login, connection, rejection and SYSTEM command to `audit/audit.log` (JSON Lines). With Docker it is kept in `deploy/relay/audit/`. |
+| **`/api/clients`** | Only with the `X-Admin-Token` header. |
 
-- ✅ **İcazə (consent):** hər sessiya istifadəçinin təsdiqini tələb edir; ekran
-  serveri yalnız "Bəli"-dən sonra başlayır və viewer ayrılanda / heç kim
-  qoşulmayanda (30 s) avtomatik dayanır.
-- ⏳ **Sessiya tokeni:** icazə pəncərəsi açıq olan qısa müddətdə portu yalnız
-  təsdiqlənmiş admin-in aça bilməsi üçün birdəfəlik token (tövsiyə olunan növbəti addım).
-- ⏳ **Şifrələmə (TLS):** media axını hazırda şifrələnmir — internet üzərindən
-  istifadədən əvvəl TLS əlavə edilməlidir.
-- ⏳ **NAT / uzaq keçid:** fərqli şəbəkələrdəki kompüterlər üçün media axınını
-  relay üzərindən tunelləmək (hazırda birbaşa LAN bağlantısı).
+Not done yet:
 
-## Tələblər
+- ⏳ **Encryption (TLS):** relay traffic and the media stream are not encrypted yet — add TLS before any use over the internet.
+- ⏳ **NAT / remote access:** tunnel media through the relay for computers on other networks.
 
-- Relay: .NET 9 (ASP.NET Core), Windows və ya Linux.
-- Server/Viewer/Client: net9.0-windows. Client self-contained yayımda runtime tələb etmir.
+**Upgrade rule:** the protocol has changed — update Relay, Service, Client and Server **at the same time**.
 
-## Təhlükəsizlik
+## Requirements
 
-| Nə | Necə |
-|----|------|
-| **Admin açarı** | Relay-də `Admin:Secret` (Docker: `MILLA_ADMIN_SECRET`) **məcburidir** — boş/zəif (min 16 simvol) olsa relay produksiyada başlamır. Server `appsettings.json` → `Admin:Secret` eyni olmalıdır. |
-| **Kompüter açarı** | Relay `Client:Secret` (Docker: `MILLA_CLIENT_SECRET`) = Service/Client `Relay:ClientSecret`. Təyin olunanda yalnız açarı bilən kompüter qeydiyyatdan keçə bilir. Eyni hostname başqa IP-dən onlayndırsa, ikinci qeydiyyat rədd edilir. |
-| **Sessiya açarı** | Hər qoşulma sorğusu üçün relay bir dəfəlik təsadüfi açar yaradır. Agent 7000 portunda yalnız bu açarı göndərən viewer-i qəbul edir; açar yalnız sorğunu göndərən adminə verilir. Agentin "qəbul etdi" cavabı da bu açarla yoxlanır. |
-| **SYSTEM proqram siyasəti** | Service `appsettings.json` → `Launch:Enabled` (false = tam bağlı) və `Launch:AllowedPrograms` (məs. `["msiexec.exe", "C:\Deploy\*"]`). Siyahı doludursa, relay ələ keçsə belə kompüter yalnız bunları açır. |
-| **Audit jurnalı** | Relay hər girişi, qoşulmanı, rəddi və SYSTEM əmrini `audit/audit.log`-a (JSON Lines) yazır. Docker-də `deploy/relay/audit/` qovluğunda saxlanır. |
-| **`/api/clients`** | Yalnız `X-Admin-Token` başlığı ilə. |
-
-> Hələ edilməyib: trafikin **şifrələnməsi** (TLS) — növbəti addım.
-
-**Yeniləmə qaydası:** protokol dəyişib — Relay, Service, Client və Server **eyni vaxtda** yenilənməlidir.
+- Relay: .NET 9 (ASP.NET Core), Windows or Linux.
+- Server / Viewer / Client / Service: net9.0-windows. Self-contained publishes need no runtime on the target.
