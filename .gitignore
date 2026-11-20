@@ -17,3 +17,6 @@ deploy/service-package/
 # Relay TLS sertifikatı (gizli açar)
 deploy/relay/certs/
 deploy/relay/audit/
+
+# Admin hesabları (parol hash-ləri)
+deploy/relay/config/admins.json

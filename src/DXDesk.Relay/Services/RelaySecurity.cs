@@ -14,15 +14,26 @@ public sealed class RelaySecurity
     private const int MinSecretLength = 16;
     private readonly byte[]? _admin;
     private readonly byte[]? _client;
+    private readonly AdminAccounts _accounts;
+    private readonly bool _devOpen;
+
+    /// <summary>Köhnə ortaq Admin:Secret hələ qəbul olunurmu (Admin:AllowSharedSecret, standart true).</summary>
+    public bool SharedSecretAllowed { get; }
 
     public bool ClientSecretEnabled => _client is not null;
 
-    public RelaySecurity(IConfiguration config, IHostEnvironment env, ILogger<RelaySecurity> logger)
+    public RelaySecurity(IConfiguration config, IHostEnvironment env, ILogger<RelaySecurity> logger, AdminAccounts accounts)
     {
+        _accounts = accounts;
         var admin = config["Admin:Secret"];
         var client = config["Client:Secret"];
+        SharedSecretAllowed = !string.Equals(config["Admin:AllowSharedSecret"], "false", StringComparison.OrdinalIgnoreCase);
 
-        if (!IsStrong(admin))
+        if (!SharedSecretAllowed)
+        {
+            logger.LogInformation("Ortaq Admin:Secret söndürülüb — yalnız şəxsi admin hesabları.");
+        }
+        else if (!IsStrong(admin))
         {
             if (!env.IsDevelopment())
             {
@@ -31,6 +42,7 @@ public sealed class RelaySecurity
                     "Docker-də MILLA_ADMIN_SECRET dəyişənini qoyun.");
             }
             logger.LogWarning("DEV rejimi: Admin:Secret yoxdur — admin yoxlaması SÖNDÜRÜLÜB.");
+            _devOpen = true;
         }
         else
         {
@@ -47,7 +59,20 @@ public sealed class RelaySecurity
         }
     }
 
-    public bool IsAdmin(string? token) => _admin is null || Matches(_admin, token);
+    /// <summary>
+    /// Admin tokenini yoxlayır və adminin adını qaytarır (audit üçün), etibarsızdırsa null.
+    /// Token: şəxsi hesabla Login-dən alınan sessiya açarı və ya (icazə verilibsə) ortaq Admin:Secret.
+    /// </summary>
+    public string? ResolveAdmin(string? token)
+    {
+        var name = _accounts.Resolve(token);
+        if (name is not null) return name;
+        if (SharedSecretAllowed && _admin is not null && Matches(_admin, token)) return "shared-secret";
+        if (_devOpen) return "dev";
+        return null;
+    }
+
+    public bool IsAdmin(string? token) => ResolveAdmin(token) is not null;
 
     // ---- Səhv cəhd limiti (açarı sınaq-səhvlə tapmağa qarşı) ----
     private const int MaxFailures = 10;

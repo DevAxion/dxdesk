@@ -1,9 +1,16 @@
 using DXDesk.Relay.Hubs;
 using DXDesk.Relay.Services;
 
+// Admin parolunun hash-ini yaratmaq:  docker compose run --rm -it relay hash-password
+if (args.Length > 0 && args[0] == "hash-password")
+{
+    return AdminAccounts.RunHashTool();
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<ClientRegistry>();
+builder.Services.AddSingleton<AdminAccounts>();
 builder.Services.AddSingleton<RelaySecurity>();
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<StreamBroker>();
@@ -46,3 +53,4 @@ app.MapGet("/api/clients", (HttpContext ctx, ClientRegistry registry) =>
 app.Logger.LogInformation("DXDesk Relay başladı. Hub endpoint: /remotehub");
 
 app.Run();
+return 0;

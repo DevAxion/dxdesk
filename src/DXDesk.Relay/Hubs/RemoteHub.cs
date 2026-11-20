@@ -15,18 +15,23 @@ public sealed class RemoteHub : Hub
     private readonly ClientRegistry _registry;
     private readonly RelaySecurity _security;
     private readonly AuditLog _audit;
+    private readonly AdminAccounts _accounts;
     private readonly ILogger<RemoteHub> _logger;
 
-    public RemoteHub(ClientRegistry registry, RelaySecurity security, AuditLog audit, ILogger<RemoteHub> logger)
+    public RemoteHub(ClientRegistry registry, RelaySecurity security, AuditLog audit, AdminAccounts accounts, ILogger<RemoteHub> logger)
     {
+        _accounts = accounts;
         _registry = registry;
         _security = security;
         _audit = audit;
         _logger = logger;
     }
 
-    /// <summary>Admin əmrləri üçün token yoxlaması.</summary>
-    private void RequireAdmin(string? token, string action, string? target = null)
+    /// <summary>
+    /// Şəxsi admin girişi: ad + parol düzgündürsə sessiya açarı (12 saat) qaytarır.
+    /// Bu açar sonra RegisterAdmin/RequestConnection/LaunchElevated-ə token kimi verilir.
+    /// </summary>
+    public string Login(string username, string password)
     {
         var ip = ResolveRemoteIp();
         if (_security.IsBlocked(ip))
@@ -34,7 +39,34 @@ public sealed class RemoteHub : Hub
             throw new HubException("Çox sayda səhv cəhd — müvəqqəti bloklanıb.");
         }
 
-        if (!_security.IsAdmin(token))
+        var token = _accounts.Login(username, password);
+        if (token is null)
+        {
+            if (_security.RecordFailure(ip))
+            {
+                _logger.LogWarning("IP səhv admin cəhdlərinə görə 15 dəqiqəlik bloklandı: {Ip}", ip);
+                _audit.Write("admin_blocked", ip, null, new { action = "login", admin = username });
+            }
+            _logger.LogWarning("Uğursuz admin girişi: {User} ({Ip})", username, ip);
+            _audit.Write("admin_login_failed", ip, null, new { admin = username });
+            throw new HubException("İstifadəçi adı və ya parol yanlışdır.");
+        }
+
+        _logger.LogInformation("Admin girişi: {User} ({Ip})", username, ip);
+        return token;
+    }
+
+    /// <summary>Admin əmrləri üçün token yoxlaması. Adminin adını qaytarır.</summary>
+    private string RequireAdmin(string? token, string action, string? target = null)
+    {
+        var ip = ResolveRemoteIp();
+        if (_security.IsBlocked(ip))
+        {
+            throw new HubException("Çox sayda səhv cəhd — müvəqqəti bloklanıb.");
+        }
+
+        var admin = _security.ResolveAdmin(token);
+        if (admin is null)
         {
             if (_security.RecordFailure(ip))
             {
@@ -43,8 +75,9 @@ public sealed class RemoteHub : Hub
             }
             _logger.LogWarning("İcazəsiz admin əmri cəhdi: {Action} {ConnectionId}", action, Context.ConnectionId);
             _audit.Write("admin_denied", ResolveRemoteIp(), target, new { action });
-            throw new HubException("İcazə yoxdur (yanlış admin token).");
+            throw new HubException("İcazə yoxdur (yanlış admin token və ya sessiyanın vaxtı keçib).");
         }
+        return admin;
     }
 
     /// <summary>Kliyent qoşulan kimi öz hostname-i ilə qeydiyyatdan keçir.</summary>
@@ -78,11 +111,11 @@ public sealed class RemoteHub : Hub
     /// <summary>Admin aləti qoşulanda çağırır — onlayn siyahı yeniliklərini almaq üçün.</summary>
     public async Task RegisterAdmin(string token)
     {
-        RequireAdmin(token, "register_admin");
+        var admin = RequireAdmin(token, "register_admin");
         _registry.AddAdmin(Context.ConnectionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, ClientRegistry.AdminGroup);
-        _logger.LogInformation("Admin qoşuldu: {ConnectionId}", Context.ConnectionId);
-        _audit.Write("admin_login", ResolveRemoteIp());
+        _logger.LogInformation("Admin qoşuldu: {Admin} {ConnectionId}", admin, Context.ConnectionId);
+        _audit.Write("admin_login", ResolveRemoteIp(), null, new { admin });
 
         await Clients.Caller.SendAsync("ClientsChanged", _registry.GetClients());
     }
@@ -100,7 +133,7 @@ public sealed class RemoteHub : Hub
     /// <summary>Admin çağırır: göstərilən kompüterə qoşulma sorğusu göndər.</summary>
     public async Task<RequestResult> RequestConnection(string token, string targetHostname)
     {
-        RequireAdmin(token, "connect", targetHostname);
+        var admin = RequireAdmin(token, "connect", targetHostname);
         if (string.IsNullOrWhiteSpace(targetHostname))
         {
             return new RequestResult(false, "Hostname boş ola bilməz.", null, null);
@@ -117,7 +150,7 @@ public sealed class RemoteHub : Hub
         _registry.SetPendingRequest(client.Hostname, Context.ConnectionId, sessionToken);
         await Clients.Client(client.ConnectionId).SendAsync("ConnectionRequest", client.Hostname, sessionToken);
         _logger.LogInformation("Qoşulma sorğusu göndərildi: {Hostname}", client.Hostname);
-        _audit.Write("connect_request", ResolveRemoteIp(), client.Hostname, new { clientIp = client.IpAddress });
+        _audit.Write("connect_request", ResolveRemoteIp(), client.Hostname, new { admin, clientIp = client.IpAddress });
 
         return new RequestResult(true, null, client.Hostname, client.IpAddress);
     }
@@ -128,7 +161,7 @@ public sealed class RemoteHub : Hub
     /// </summary>
     public async Task<RequestResult> LaunchElevated(string token, string targetHostname, string program, string arguments)
     {
-        RequireAdmin(token, "launch_elevated", targetHostname);
+        var admin = RequireAdmin(token, "launch_elevated", targetHostname);
         if (string.IsNullOrWhiteSpace(targetHostname) || string.IsNullOrWhiteSpace(program))
         {
             return new RequestResult(false, "Hostname və proqram tələb olunur.", null, null);
@@ -142,7 +175,7 @@ public sealed class RemoteHub : Hub
 
         await Clients.Client(client.ConnectionId).SendAsync("LaunchElevated", program, arguments ?? string.Empty);
         _logger.LogInformation("Elevated launch göndərildi: {Hostname} -> {Program}", client.Hostname, program);
-        _audit.Write("launch_elevated", ResolveRemoteIp(), client.Hostname, new { program, arguments });
+        _audit.Write("launch_elevated", ResolveRemoteIp(), client.Hostname, new { admin, program, arguments });
         return new RequestResult(true, null, client.Hostname, client.IpAddress);
     }
 

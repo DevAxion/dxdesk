@@ -28,9 +28,16 @@ services:
       - Admin__Secret=${MILLA_ADMIN_SECRET:-}
       # Kompüterlərin qeydiyyat açarı (Service appsettings.json -> Relay:ClientSecret ilə eyni).
       - Client__Secret=${MILLA_CLIENT_SECRET:-}
+      # Şəxsi admin hesabları: config/admins.json (README → Admin accounts).
+      # Hesablar yaradıldıqdan sonra .env-də MILLA_ADMIN_ALLOW_SECRET=false qoyun —
+      # onda köhnə ortaq Admin:Secret artıq qəbul olunmur.
+      - Admin__UsersFile=/app/config/admins.json
+      - Admin__AllowSharedSecret=${MILLA_ADMIN_ALLOW_SECRET:-true}
       - Audit__Path=/app/audit/audit.log
     volumes:
       # Audit jurnalı konteyner yenilənəndə itməsin.
       - ./audit:/app/audit
       # TLS sertifikatı (make-cert.sh yaradır), yalnız oxumaq üçün.
       - ./certs:/app/certs:ro
+      # Admin hesabları (yalnız parol hash-ləri), yalnız oxumaq üçün.
+      - ./config:/app/config:ro

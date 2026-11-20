@@ -59,6 +59,28 @@ Console.WriteLine("Relay-ə qoşulur...");
 try
 {
     await connection.StartAsync();
+
+    // Şəxsi hesab: appsettings-də Admin:Secret yoxdursa ad və parol soruşulur.
+    // Parol yalnız relay-ə (TLS ilə) gedir; geri sessiya açarı gəlir.
+    if (string.IsNullOrEmpty(adminSecret))
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            Console.Write("İstifadəçi adı: ");
+            var user = Console.ReadLine()?.Trim() ?? "";
+            var password = ReadPassword("Parol: ");
+            try
+            {
+                adminSecret = await connection.InvokeAsync<string>("Login", user, password);
+                break;
+            }
+            catch (Microsoft.AspNetCore.SignalR.HubException ex) when (attempt < 3)
+            {
+                Console.WriteLine($"  ✗ {ex.Message}\n");
+            }
+        }
+    }
+
     await connection.InvokeAsync("RegisterAdmin", adminSecret);
     Console.WriteLine("Qoşuldu.\n");
 }
@@ -69,6 +91,13 @@ catch (Exception ex)
     Console.ReadLine();
     return;
 }
+
+// Bağlantı qırılıb bərpa olunanda onlayn siyahını yenidən almaq üçün qeydiyyat.
+connection.Reconnected += async _ =>
+{
+    try { await connection.InvokeAsync("RegisterAdmin", adminSecret); }
+    catch (Exception ex) { Console.WriteLine($"\n  Yenidən qeydiyyat alınmadı: {ex.Message} — proqramı yenidən açın."); }
+};
 
 var running = true;
 while (running)
@@ -222,4 +251,24 @@ async Task LaunchElevatedAsync()
     {
         Console.WriteLine($"  Xəta: {ex.Message}\n");
     }
+}
+
+static string ReadPassword(string prompt)
+{
+    Console.Write(prompt);
+    if (Console.IsInputRedirected) return Console.ReadLine() ?? "";
+    var sb = new System.Text.StringBuilder();
+    while (true)
+    {
+        var k = Console.ReadKey(intercept: true);
+        if (k.Key == ConsoleKey.Enter) break;
+        if (k.Key == ConsoleKey.Backspace)
+        {
+            if (sb.Length > 0) { sb.Length--; Console.Write("\b \b"); }
+            continue;
+        }
+        if (!char.IsControl(k.KeyChar)) { sb.Append(k.KeyChar); Console.Write('*'); }
+    }
+    Console.WriteLine();
+    return sb.ToString();
 }

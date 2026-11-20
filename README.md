@@ -107,7 +107,8 @@ dotnet publish src/DXDesk.Server/DXDesk.Server.csproj -c Release -r win-x64
 ```
 
 `appsettings.json` → `Relay:Url` must point to the relay (e.g. `http://10.30.2.11:5100/remotehub`),
-and `Admin:Secret` must match the relay's secret.
+and `Admin:Secret` should be **empty**: the tool then asks for your personal username and password
+(see [Admin accounts](#admin-accounts)). A non-empty `Admin:Secret` still uses the old shared secret.
 
 Menu (the UI is in Azerbaijani):
 
@@ -250,9 +251,32 @@ certificate needs no distribution and is the only option that satisfies Smart Ap
 | **Audit log** | The relay writes every admin login, connection, rejection and SYSTEM command to `audit/audit.log` (JSON Lines). With Docker it is kept in `deploy/relay/audit/`. |
 | **`/api/clients`** | Only with the `X-Admin-Token` header. |
 
+### Admin accounts
+
+Every admin has their own username and password. The relay stores only a PBKDF2-SHA256 hash
+(600 000 iterations) in `deploy/relay/config/admins.json`; the audit log records the admin's name.
+
+1. Create a hash (on the Ubuntu server, in `deploy/relay`; the password is not shown or stored):
+
+   ```bash
+   sudo docker compose run --rm -it relay hash-password
+   ```
+
+2. Add the user to `config/admins.json` (format: `config/admins.example.json`):
+
+   ```json
+   { "users": [ { "name": "ali", "hash": "pbkdf2-sha256$600000$..." } ] }
+   ```
+
+   The file is re-read on every login — no restart needed. Removing a user also ends their open sessions.
+3. In the admin tool's `appsettings.json`, leave `Admin:Secret` empty — it will ask for username and password.
+4. When every admin has an account, add `MILLA_ADMIN_ALLOW_SECRET=false` to `.env` and run
+   `sudo docker compose up -d` — the old shared secret is then rejected.
+
+A login gives a session that lasts 12 hours. Wrong passwords count toward the same brute-force limit.
+
 Not done yet:
 
-- ⏳ **Per-admin identity:** all admins share one `Admin:Secret`; the audit log shows only the IP.
 - ⏳ **Machine identity:** `Client:Secret` is the same on every PC; a stronger option is a per-machine certificate.
 
 **Upgrade rule:** the protocol has changed — update Relay, Service, Client and Server **at the same time**.
