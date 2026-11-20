@@ -42,7 +42,12 @@ public sealed class ViewerForm : Form
             BackColor = Color.Black,
         };
 
-        _infoLabel = new ToolStripStatusLabel("Gözlənilir...");
+        // Spring: uzun mətn sığmayanda gizlənmək əvəzinə qısaldılır.
+        _infoLabel = new ToolStripStatusLabel("Gözlənilir...")
+        {
+            Spring = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
         // Forma qara olduğu üçün status zolağı da qara görünürdü və mətn oxunmurdu.
         _status = new StatusStrip
         {
@@ -299,6 +304,8 @@ public sealed class ViewerForm : Form
             return;
         }
         _infoLabel.Text = text;
+        _infoLabel.ToolTipText = text;
+        VLog($"status: {text}");
     }
 
     private void UpdateStats(int frameBytes, int w, int h)
