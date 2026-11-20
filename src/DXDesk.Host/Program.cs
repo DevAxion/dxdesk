@@ -135,8 +135,8 @@ static async Task RelayTestAsync(string relayUrl, CancellationToken ct)
     const string testHost = "RELAYTEST-PC";
     const int testPort = 7123;
 
-    var client = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder().WithUrl(relayUrl).Build();
-    var admin = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder().WithUrl(relayUrl).Build();
+    var client = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder().WithUrl(relayUrl, RelayTls.Configure).Build();
+    var admin = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder().WithUrl(relayUrl, RelayTls.Configure).Build();
 
     var responseTcs = new TaskCompletionSource<(string host, bool accepted, int port)>();
 
@@ -278,10 +278,11 @@ static void CaptureTest()
 
 static async Task RelayStreamTestAsync(string relayUrl, CancellationToken ct)
 {
+    RelayTls.PinnedThumbprint = Environment.GetEnvironmentVariable("DXDESK_CERT_PIN");
     // Relay üzərindən ekran axını: admin sorğu göndərir, "agent" açarla relay-ə qoşulur,
     // viewer relay üzərindən kadrları alır. Yanlış açar rədd edilməlidir.
-    var admin = new HubConnectionBuilder().WithUrl(relayUrl).Build();
-    var client = new HubConnectionBuilder().WithUrl(relayUrl).Build();
+    var admin = new HubConnectionBuilder().WithUrl(relayUrl, RelayTls.Configure).Build();
+    var client = new HubConnectionBuilder().WithUrl(relayUrl, RelayTls.Configure).Build();
     var adminSecret = Environment.GetEnvironmentVariable("DXDESK_ADMIN_SECRET") ?? "";
     var clientSecret = Environment.GetEnvironmentVariable("DXDESK_CLIENT_SECRET") ?? "";
     var streamUrl = RelayStream.StreamUrlFromHub(relayUrl);

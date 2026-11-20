@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -47,6 +48,32 @@ public sealed class RelaySecurity
     }
 
     public bool IsAdmin(string? token) => _admin is null || Matches(_admin, token);
+
+    // ---- Səhv cəhd limiti (açarı sınaq-səhvlə tapmağa qarşı) ----
+    private const int MaxFailures = 10;
+    private static readonly TimeSpan FailureWindow = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan BlockDuration = TimeSpan.FromMinutes(15);
+    private readonly ConcurrentDictionary<string, (int Count, DateTimeOffset First, DateTimeOffset BlockedUntil)> _failures = new();
+
+    /// <summary>Bu IP səhv cəhdlərə görə müvəqqəti bloklanıbmı.</summary>
+    public bool IsBlocked(string? ip) =>
+        ip is not null && _failures.TryGetValue(ip, out var f) && f.BlockedUntil > DateTimeOffset.UtcNow;
+
+    /// <summary>Səhv açar cəhdini qeyd edir; limit aşılanda IP bloklanır. Bloklandısa true.</summary>
+    public bool RecordFailure(string? ip)
+    {
+        if (ip is null) return false;
+        var now = DateTimeOffset.UtcNow;
+        var entry = _failures.AddOrUpdate(ip,
+            _ => (1, now, DateTimeOffset.MinValue),
+            (_, f) => now - f.First > FailureWindow ? (1, now, DateTimeOffset.MinValue) : (f.Count + 1, f.First, f.BlockedUntil));
+        if (entry.Count >= MaxFailures && entry.BlockedUntil <= now)
+        {
+            _failures[ip] = (entry.Count, entry.First, now + BlockDuration);
+            return true;
+        }
+        return false;
+    }
 
     public bool IsValidClient(string? token) => _client is null || Matches(_client, token);
 

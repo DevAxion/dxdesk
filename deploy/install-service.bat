@@ -18,6 +18,19 @@ set "DEST=%ProgramData%\DXDesk"
 set "LOG=%DEST%\install.log"
 
 if not exist "%DEST%" mkdir "%DEST%"
+
+REM --- TEHLUKESIZLIK: qovlugu yalniz SYSTEM/Administrators yaza bilsin ---
+REM     ProgramData adi istifadecilere fayl/qovluq yaratmaga icaze verir (Users: WD,AD).
+REM     Bu olmasa, istifadeci xidmetin yanina saxta DLL qoyub SYSTEM ola bilerdi.
+REM     SID-ler dil-asili deyil: S-1-5-18=SYSTEM, S-1-5-32-544=Administrators, S-1-5-32-545=Users.
+icacls "%DEST%" /setowner *S-1-5-32-544 /T /C >nul 2>&1
+icacls "%DEST%" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /T /C >nul 2>&1
+REM     Ichindeki her seyi yalniz bu qaydalardan miras alsin (elave/xususi icazeler silinir).
+icacls "%DEST%\*" /reset /T /C >nul 2>&1
+REM     Kenar sexsin evvelceden qoydugu DLL-leri ve junction/qovluq yonlendirmelerini sil.
+del /f /q "%DEST%\*.dll" >nul 2>&1
+fsutil reparsepoint query "%DEST%\clip" >nul 2>&1 && rmdir "%DEST%\clip" >nul 2>&1
+
 echo [%date% %time%] service install basladi, SRC=%SRC%, PC=%COMPUTERNAME%>> "%LOG%"
 
 if not exist "%SRC%\DXDesk.Service.exe" (
@@ -34,6 +47,9 @@ timeout /t 3 /nobreak >nul 2>&1
 REM --- Fayllari kopyala ---
 robocopy "%SRC%" "%DEST%" DXDesk.Service.exe DXDesk.Client.exe appsettings.json /R:2 /W:3>> "%LOG%" 2>&1
 echo robocopy exit=%ERRORLEVEL%>> "%LOG%"
+
+REM --- appsettings.json-da acarlar var: yalniz SYSTEM/Administrators oxuya bilsin ---
+icacls "%DEST%\appsettings.json" /inheritance:r /grant:r *S-1-5-18:F *S-1-5-32-544:F >nul 2>&1
 
 REM --- Windows 11: sebekeden kopyalanan fayllardan "internetden gelib" isaresini sil ---
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%DEST%' -File | Unblock-File">> "%LOG%" 2>&1

@@ -134,8 +134,14 @@ public sealed class FileTransferReceiver : IDisposable
     private readonly Action<string> _log;
     private readonly string _stageBase;
 
+    /// <summary>Bir köçürmədə maksimum fayl sayı və ümumi ölçü (diski doldurmağa qarşı).</summary>
+    public const int MaxFiles = 10_000;
+    public const long MaxTotalBytes = 4L * 1024 * 1024 * 1024; // 4 GB
+
     private string? _stageRoot;
     private List<FileStream>? _streams;
+    private List<long>? _declared;
+    private List<long>? _written;
     private List<string>? _topLevel;
 
     /// <summary>Son qəbul edilən dəstin imzası (echo qorunması üçün).</summary>
@@ -180,7 +186,16 @@ public sealed class FileTransferReceiver : IDisposable
 
         var pos = 1;
         var count = ReadInt(b, ref pos);
+        if (count < 0 || count > MaxFiles)
+        {
+            throw new InvalidDataException($"Fayl sayı limiti aşıldı: {count}");
+        }
         _streams = new List<FileStream>(count);
+        _declared = new List<long>(count);
+        _written = new List<long>(count);
+        long total = 0;
+        // Yol yoxlaması üçün kök SONUNDA ayırıcı ilə (yoxsa "<root>x\..." keçərdi).
+        var rootWithSep = Path.TrimEndingDirectorySeparator(_stageRoot) + Path.DirectorySeparatorChar;
         var topSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var sigItems = new List<string>();
 
@@ -190,14 +205,22 @@ public sealed class FileTransferReceiver : IDisposable
             var rel = Encoding.UTF8.GetString(b, pos, relLen); pos += relLen;
             var size = ReadLong(b, ref pos);
 
+            if (size < 0 || (total += size) > MaxTotalBytes)
+            {
+                throw new InvalidDataException("Ölçü limiti aşıldı.");
+            }
+
             var full = Path.GetFullPath(Path.Combine(_stageRoot, rel));
-            // Path traversal qoruması
-            if (!full.StartsWith(_stageRoot, StringComparison.OrdinalIgnoreCase))
+            // Path traversal qoruması: yalnız staging kökünün İÇİ, ADS (":") qadağan.
+            if (!full.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase) ||
+                full.IndexOf(':', 2) >= 0)
             {
                 throw new InvalidDataException("Yanlış yol.");
             }
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            _streams.Add(new FileStream(full, FileMode.Create, FileAccess.Write));
+            _streams.Add(new FileStream(full, FileMode.CreateNew, FileAccess.Write));
+            _declared.Add(size);
+            _written.Add(0);
 
             var firstSeg = rel.Replace('/', '\\').Split('\\')[0];
             topSet.Add(Path.Combine(_stageRoot, firstSeg));
@@ -216,9 +239,15 @@ public sealed class FileTransferReceiver : IDisposable
         var pos = 1;
         var index = ReadInt(b, ref pos);
         var len = ReadInt(b, ref pos);
-        if (index >= 0 && index < _streams.Count)
+        if (index >= 0 && index < _streams.Count && len >= 0 && pos + len <= b.Length)
         {
+            // Elan olunan ölçüdən artıq yazmağa icazə vermirik.
+            if (_written![index] + len > _declared![index])
+            {
+                throw new InvalidDataException("Fayl elan olunan ölçüdən böyükdür.");
+            }
             _streams[index].Write(b, pos, len);
+            _written[index] += len;
         }
     }
 

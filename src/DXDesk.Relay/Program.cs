@@ -34,10 +34,14 @@ app.MapGet("/", () => Results.Text("DXDesk Relay işləyir. Hub: /remotehub", "t
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }));
 
 // Onlayn siyahı yalnız admin açarı ilə (başlıq: X-Admin-Token).
-app.MapGet("/api/clients", (HttpRequest request, ClientRegistry registry) =>
-    security.IsAdmin(request.Headers["X-Admin-Token"].ToString())
-        ? Results.Ok(registry.GetClients())
-        : Results.Unauthorized());
+app.MapGet("/api/clients", (HttpContext ctx, ClientRegistry registry) =>
+{
+    var ip = ctx.Connection.RemoteIpAddress?.ToString();
+    if (security.IsBlocked(ip)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+    if (security.IsAdmin(ctx.Request.Headers["X-Admin-Token"].ToString())) return Results.Ok(registry.GetClients());
+    security.RecordFailure(ip);
+    return Results.Unauthorized();
+});
 
 app.Logger.LogInformation("DXDesk Relay başladı. Hub endpoint: /remotehub");
 

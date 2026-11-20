@@ -47,7 +47,7 @@ DXDesk shares the user's **real (attended) session**.
 - The agent runs as **SYSTEM** and follows desktop switches (Default ↔ Secure/Winlogon),
   so UAC prompts are visible and can be answered remotely.
 
-> Relay traffic is not encrypted yet (no TLS) — see [Security](#security).
+> Enable TLS on the relay before production use — see [Security](#security).
 
 ---
 
@@ -240,13 +240,20 @@ certificate needs no distribution and is the only option that satisfies Smart Ap
 | **Admin secret** | `Admin:Secret` on the relay (Docker: `MILLA_ADMIN_SECRET`) is **mandatory** — if it is empty or weak (min 16 chars), the relay refuses to start in Production. The Server's `appsettings.json` → `Admin:Secret` must match. |
 | **Client secret** | Relay `Client:Secret` (Docker: `MILLA_CLIENT_SECRET`) = Service/Client `Relay:ClientSecret`. When set, only computers that know the secret can register. If a hostname is already online from a different IP, a second registration is rejected. |
 | **Session token** | For each connection request the relay creates a random one-time token. The agent on port 7000 accepts only the viewer that sends this token, and the token goes only to the admin who made the request. The agent's "accepted" reply is verified with the same token. |
-| **SYSTEM launch policy** | Service `appsettings.json` → `Launch:Enabled` (`false` = fully disabled) and `Launch:AllowedPrograms` (e.g. `["msiexec.exe", "C:\\Deploy\\*"]`). If the list is set, the PC only runs those programs, even if the relay is compromised. |
+| **SYSTEM launch policy** | Service `appsettings.json` → `Launch:AllowedPrograms` (e.g. `["msiexec.exe", "\\\\server\\share\\*"]`; `*` at the end = prefix). **Deny by default:** an empty list runs nothing. `Launch:Enabled: false` disables it completely; `Launch:AllowAny: true` allows everything (not recommended). Enforced on the PC, so it holds even if the relay is compromised. |
+| **Install folder** | `install-service.bat` locks `C:\ProgramData\DXDesk` to SYSTEM/Administrators (Users: read only), removes planted DLLs and junctions, and makes `appsettings.json` unreadable for users. Native DLLs load from System32 only. Without this, a standard user could plant a DLL next to the SYSTEM service. |
+| **TLS** | `deploy/relay/make-cert.sh <relay-ip>` creates a certificate and prints the `.env` lines and the SHA-256 fingerprint. Clients pin it via `Relay:CertThumbprint` and use `https://…/remotehub` — no GPO distribution needed, and any other certificate is rejected. |
+| **Brute force** | 10 wrong admin secrets from one IP in 5 minutes → that IP is blocked for 15 minutes (`admin_blocked` in the audit log). |
+| **Consent dialog** | Auto-declines after 60 s, and immediately when the screen is locked. |
+| **File transfer** | Paths must stay inside the staging folder, max 10 000 files / 4 GB, and no file may exceed its declared size. |
 | **Audit log** | The relay writes every admin login, connection, rejection and SYSTEM command to `audit/audit.log` (JSON Lines). With Docker it is kept in `deploy/relay/audit/`. |
 | **`/api/clients`** | Only with the `X-Admin-Token` header. |
 
 Not done yet:
 
-- ⏳ **Encryption (TLS):** relay traffic and the media stream are not encrypted yet — add TLS before any use over the internet.
+- ⏳ **Per-admin identity:** all admins share one `Admin:Secret`; the audit log shows only the IP.
+- ⏳ **Machine identity:** `Client:Secret` is the same on every PC; a stronger option is a per-machine certificate.
+- ⏳ **Container user:** the relay container still runs as root.
 
 **Upgrade rule:** the protocol has changed — update Relay, Service, Client and Server **at the same time**.
 

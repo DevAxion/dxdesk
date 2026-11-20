@@ -13,3 +13,7 @@ deploy/service-package/
 # Lokal sirlər — commit etmə
 .env
 **/.env
+
+# Relay TLS sertifikatı (gizli açar)
+deploy/relay/certs/
+deploy/relay/audit/

@@ -4,6 +4,7 @@ using DXDesk.Client;
 using DXDesk.Core;
 
 // Miqyaslanmış ekranlarda tam çözünürlük üçün ƏN BAŞDA DPI-aware et.
+ProcessDllSafety.Apply();
 DXDesk.Client.NativeMethods.EnableDpiAwareness();
 
 // ---- Konfiqurasiya ----
@@ -15,6 +16,7 @@ var config = new ConfigurationBuilder()
 
 var relayUrl = config["Relay:Url"] ?? "http://localhost:5100/remotehub";
 var clientSecret = config["Relay:ClientSecret"] ?? "";
+RelayTls.PinnedThumbprint = config["Relay:CertThumbprint"];
 var reconnectDelay = TimeSpan.FromSeconds(
     int.TryParse(config["Relay:ReconnectDelaySeconds"], out var s) && s > 0 ? s : 10);
 
@@ -44,7 +46,19 @@ if (args.Length >= 5 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     }
     AgentLog($"--- Agent başladı. Identity={System.Security.Principal.WindowsIdentity.GetCurrent().Name}, host={agentHost}, port={agentPort} ---");
 
-    var accepted = ShowRequestDialog();
+    // Ekran kilidlidirsə (Winlogon/Secure masaüstü) istifadəçi pəncərəni görə bilməz —
+    // sorğunu dərhal rədd edirik, əks halda agent sonsuza qədər ilişib qalardı.
+    var inputDesktop = DesktopControl.CurrentInputDesktopName();
+    bool accepted;
+    if (inputDesktop is not null && !inputDesktop.Equals("Default", StringComparison.OrdinalIgnoreCase))
+    {
+        accepted = false;
+        AgentLog($"Ekran kilidlidir ('{inputDesktop}') — sorğu avtomatik rədd edildi.");
+    }
+    else
+    {
+        accepted = ShowRequestDialog();
+    }
     AgentLog($"İcazə: {(accepted ? "QƏBUL" : "RƏDD")}");
 
     // Qəbul olunarsa, ekran serverini (masaüstü-izləyən agent) ayrıca thread-də
@@ -65,7 +79,7 @@ if (args.Length >= 5 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
         Thread.Sleep(200); // listener qalxsın
     }
 
-    var conn = new HubConnectionBuilder().WithUrl(agentRelay).Build();
+    var conn = new HubConnectionBuilder().WithUrl(agentRelay, RelayTls.Configure).Build();
     try
     {
         await conn.StartAsync();
@@ -102,7 +116,7 @@ Console.CancelKeyPress += (_, e) =>
 };
 
 var connection = new HubConnectionBuilder()
-    .WithUrl(relayUrl)
+    .WithUrl(relayUrl, RelayTls.Configure)
     .WithAutomaticReconnect(new FixedIntervalRetryPolicy(reconnectDelay))
     .Build();
 
@@ -167,9 +181,11 @@ return;
 
 // ---- Köməkçi funksiyalar ----
 
+// 60 saniyədə cavab verilməsə "Xeyr" sayılır.
 bool ShowRequestDialog() => NativeMethods.AskYesNo(
-    "IT departamenti sizin kompüterinizə qoşulmaq istəyir. Qəbul edirsiniz?",
-    "Uzaqdan Qoşulma Sorğusu");
+    "IT departamenti sizin kompüterinizə qoşulmaq istəyir. Qəbul edirsiniz?\n\n(60 saniyə ərzində cavab verilməsə, sorğu rədd ediləcək.)",
+    "Uzaqdan Qoşulma Sorğusu",
+    TimeSpan.FromSeconds(60));
 
 async Task ConnectLoopAsync()
 {
@@ -225,4 +241,18 @@ void Log(string message) =>
 file sealed class FixedIntervalRetryPolicy(TimeSpan delay) : IRetryPolicy
 {
     public TimeSpan? NextRetryDelay(RetryContext retryContext) => delay;
+}
+
+// TƏHLÜKƏSİZLİK: prosesin bütün sonrakı DLL yükləmələri yalnız System32-dən olsun.
+static class ProcessDllSafety
+{
+    private const uint LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x00000800;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetDefaultDllDirectories(uint directoryFlags);
+
+    public static void Apply()
+    {
+        try { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32); } catch { }
+    }
 }

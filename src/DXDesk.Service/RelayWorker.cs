@@ -24,6 +24,7 @@ public sealed class RelayWorker : BackgroundService
     private readonly string _clientSecret;
     private readonly bool _launchEnabled;
     private readonly string[] _launchAllowed;
+    private readonly bool _launchAllowAny;
 
     public RelayWorker(ILogger<RelayWorker> logger, IConfiguration config)
     {
@@ -32,7 +33,9 @@ public sealed class RelayWorker : BackgroundService
         _streamPort = int.TryParse(config["Stream:Port"], out var p) && p > 0 ? p : 7000;
         _agentPath = ResolveAgentPath(config["Agent:Path"]);
         _clientSecret = config["Relay:ClientSecret"] ?? "";
+        DXDesk.Core.RelayTls.PinnedThumbprint = config["Relay:CertThumbprint"];
         _launchEnabled = !string.Equals(config["Launch:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
+        _launchAllowAny = string.Equals(config["Launch:AllowAny"], "true", StringComparison.OrdinalIgnoreCase);
         _launchAllowed = config.GetSection("Launch:AllowedPrograms").GetChildren()
             .Select(c => c.Value).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()).ToArray();
     }
@@ -40,12 +43,14 @@ public sealed class RelayWorker : BackgroundService
     /// <summary>
     /// SYSTEM kimi açılacaq proqramı LOKAL siyasətlə yoxlayır. Relay ələ keçsə belə,
     /// bu kompüter yalnız icazəli siyahıdakı proqramları açır ("*" ilə bitən = prefiks).
-    /// Siyahı boşdursa hamısına icazə var (köhnə davranış), amma loqda xəbərdarlıq olur.
+    /// Siyahı boşdursa HEÇ NƏ açılmır. Hər şeyə icazə yalnız açıq-aşkar
+    /// "Launch:AllowAny": true ilə verilir (tövsiyə olunmur).
     /// </summary>
     private bool IsLaunchAllowed(string program)
     {
         if (!_launchEnabled) return false;
-        if (_launchAllowed.Length == 0) return true;
+        if (_launchAllowAny) return true;
+        if (_launchAllowed.Length == 0) return false;
         var name = program.Trim().Trim('"');
         return _launchAllowed.Any(a =>
             a.EndsWith('*')
@@ -56,7 +61,7 @@ public sealed class RelayWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var connection = new HubConnectionBuilder()
-            .WithUrl(_relayUrl)
+            .WithUrl(_relayUrl, DXDesk.Core.RelayTls.Configure)
             .WithAutomaticReconnect(new FixedIntervalRetryPolicy(_reconnectDelay))
             .Build();
 
@@ -80,9 +85,9 @@ public sealed class RelayWorker : BackgroundService
                 _logger.LogWarning("Elevated işə salma lokal siyasətlə BLOKLANDI: {Program}", program);
                 return;
             }
-            if (_launchAllowed.Length == 0)
+            if (_launchAllowAny)
             {
-                _logger.LogWarning("Launch:AllowedPrograms boşdur — istənilən proqram SYSTEM kimi açıla bilər.");
+                _logger.LogWarning("Launch:AllowAny=true — istənilən proqram SYSTEM kimi açıla bilər.");
             }
             SessionLauncher.LaunchInActiveSession(program, arguments ?? string.Empty, m => _logger.LogInformation("{Msg}", m));
         });

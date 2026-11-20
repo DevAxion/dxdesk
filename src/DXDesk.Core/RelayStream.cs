@@ -32,6 +32,7 @@ public sealed class RelayStream : Stream
     {
         var socket = new ClientWebSocket();
         socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        socket.Options.RemoteCertificateValidationCallback = (_, cert, _, errors) => RelayTls.Validate(cert, errors);
         // Açar URL-də yox, başlıqda gedir (loqlara düşməsin).
         socket.Options.SetRequestHeader("X-Session-Token", sessionToken);
         var url = new UriBuilder(streamUrl) { Query = "role=" + role }.Uri;

@@ -13,9 +13,10 @@ var config = new ConfigurationBuilder()
 var relayUrl = config["Relay:Url"] ?? "http://localhost:5100/remotehub";
 var fallbackPort = int.TryParse(config["Stream:Port"], out var fp) && fp > 0 ? fp : 7000;
 var adminSecret = config["Admin:Secret"] ?? "";
+DXDesk.Core.RelayTls.PinnedThumbprint = config["Relay:CertThumbprint"];
 
 var connection = new HubConnectionBuilder()
-    .WithUrl(relayUrl)
+    .WithUrl(relayUrl, DXDesk.Core.RelayTls.Configure)
     .WithAutomaticReconnect()
     .Build();
 

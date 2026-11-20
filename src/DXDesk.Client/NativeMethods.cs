@@ -17,6 +17,10 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 
+    // Vaxt limitli MessageBox (user32-də XP-dən bəri mövcuddur).
+    [LibraryImport("user32.dll", EntryPoint = "MessageBoxTimeoutW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int MessageBoxTimeout(IntPtr hWnd, string text, string caption, uint type, ushort languageId, uint milliseconds);
+
     [LibraryImport("kernel32.dll")]
     private static partial IntPtr GetConsoleWindow();
 
@@ -30,13 +34,26 @@ internal static partial class NativeMethods
     /// Bəli/Xeyr dialoqunu göstərir. Standart seçim "Xeyr"-dir və pəncərə
     /// ən üstdə (topmost) görünür. İstifadəçi "Bəli" seçərsə <c>true</c> qaytarır.
     /// </summary>
-    public static bool AskYesNo(string text, string caption)
+    /// <param name="timeout">Bu müddətdə cavab verilməsə, "Xeyr" sayılır (pəncərə bağlanır).</param>
+    public static bool AskYesNo(string text, string caption, TimeSpan? timeout = null)
     {
-        var result = MessageBox(
-            IntPtr.Zero,
-            text,
-            caption,
-            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2);
+        const uint flags = MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2;
+        int result;
+        if (timeout is { } t)
+        {
+            try
+            {
+                result = MessageBoxTimeout(IntPtr.Zero, text, caption, flags, 0, (uint)t.TotalMilliseconds);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                result = MessageBox(IntPtr.Zero, text, caption, flags);
+            }
+        }
+        else
+        {
+            result = MessageBox(IntPtr.Zero, text, caption, flags);
+        }
 
         return result == IDYES;
     }

@@ -9,7 +9,11 @@ services:
     ports:
       - "5100:5100"
     environment:
-      - ASPNETCORE_URLS=http://0.0.0.0:5100
+      # HTTP (standart) və ya HTTPS: make-cert.sh-in verdiyi sətirləri .env-ə yazın.
+      # "Urls" appsettings.json-dakı dəyəri əvəz edir (ASPNETCORE_URLS etmir).
+      - Urls=${RELAY_URLS:-http://0.0.0.0:5100}
+      - Kestrel__Certificates__Default__Path=${RELAY_CERT_PATH:-}
+      - Kestrel__Certificates__Default__Password=${RELAY_CERT_PASSWORD:-}
       - ASPNETCORE_ENVIRONMENT=Production
       # Admin token — YALNIZ Sulxay-ın admin aləti əmr verə bilsin deyə.
       # Eyni dəyəri admin Server appsettings.json-da da yazın. Boş buraxsanız
@@ -21,3 +25,5 @@ services:
     volumes:
       # Audit jurnalı konteyner yenilənəndə itməsin.
       - ./audit:/app/audit
+      # TLS sertifikatı (make-cert.sh yaradır), yalnız oxumaq üçün.
+      - ./certs:/app/certs:ro

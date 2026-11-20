@@ -30,4 +30,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\DXDesk.Core\DXDesk.Core.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -28,8 +28,19 @@ public sealed class RemoteHub : Hub
     /// <summary>Admin əmrləri üçün token yoxlaması.</summary>
     private void RequireAdmin(string? token, string action, string? target = null)
     {
+        var ip = ResolveRemoteIp();
+        if (_security.IsBlocked(ip))
+        {
+            throw new HubException("Çox sayda səhv cəhd — müvəqqəti bloklanıb.");
+        }
+
         if (!_security.IsAdmin(token))
         {
+            if (_security.RecordFailure(ip))
+            {
+                _logger.LogWarning("IP səhv admin cəhdlərinə görə 15 dəqiqəlik bloklandı: {Ip}", ip);
+                _audit.Write("admin_blocked", ip, target, new { action });
+            }
             _logger.LogWarning("İcazəsiz admin əmri cəhdi: {Action} {ConnectionId}", action, Context.ConnectionId);
             _audit.Write("admin_denied", ResolveRemoteIp(), target, new { action });
             throw new HubException("İcazə yoxdur (yanlış admin token).");
