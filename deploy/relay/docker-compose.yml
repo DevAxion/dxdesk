@@ -6,6 +6,13 @@ services:
     image: dxdesk-relay:latest
     container_name: dxdesk-relay
     restart: unless-stopped
+    # TƏHLÜKƏSİZLİK: konteyner root deyil (Dockerfile: USER app), əlavə Linux
+    # imtiyazları yoxdur və proses yeni imtiyaz qazana bilməz.
+    # Volume qovluqları uid 1654-ə aid olmalıdır:  sudo chown -R 1654:1654 audit certs
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "5100:5100"
     environment:

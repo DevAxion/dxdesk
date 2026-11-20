@@ -243,6 +243,7 @@ certificate needs no distribution and is the only option that satisfies Smart Ap
 | **SYSTEM launch policy** | Service `appsettings.json` → `Launch:AllowedPrograms` (e.g. `["msiexec.exe", "\\\\server\\share\\*"]`; `*` at the end = prefix). **Deny by default:** an empty list runs nothing. `Launch:Enabled: false` disables it completely; `Launch:AllowAny: true` allows everything (not recommended). Enforced on the PC, so it holds even if the relay is compromised. |
 | **Install folder** | `install-service.bat` locks `C:\ProgramData\DXDesk` to SYSTEM/Administrators (Users: read only), removes planted DLLs and junctions, and makes `appsettings.json` unreadable for users. Native DLLs load from System32 only. Without this, a standard user could plant a DLL next to the SYSTEM service. |
 | **TLS** | `deploy/relay/make-cert.sh <relay-ip>` creates a certificate and prints the `.env` lines and the SHA-256 fingerprint. Clients pin it via `Relay:CertThumbprint` and use `https://…/remotehub` — no GPO distribution needed, and any other certificate is rejected. |
+| **Container** | The relay runs as the unprivileged `app` user (uid 1654) with all Linux capabilities dropped and `no-new-privileges`. The mounted `audit/` and `certs/` folders must belong to that user: `sudo chown -R 1654:1654 audit certs`. |
 | **Brute force** | 10 wrong admin secrets from one IP in 5 minutes → that IP is blocked for 15 minutes (`admin_blocked` in the audit log). |
 | **Consent dialog** | Auto-declines after 60 s, and immediately when the screen is locked. |
 | **File transfer** | Paths must stay inside the staging folder, max 10 000 files / 4 GB, and no file may exceed its declared size. |
@@ -253,7 +254,6 @@ Not done yet:
 
 - ⏳ **Per-admin identity:** all admins share one `Admin:Secret`; the audit log shows only the IP.
 - ⏳ **Machine identity:** `Client:Secret` is the same on every PC; a stronger option is a per-machine certificate.
-- ⏳ **Container user:** the relay container still runs as root.
 
 **Upgrade rule:** the protocol has changed — update Relay, Service, Client and Server **at the same time**.
 
