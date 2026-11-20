@@ -189,6 +189,41 @@ Configuration (Client `appsettings.json` → `Stream`): `Port`, `TargetFps`, `Ti
   captured on 125%/150% scaled displays (otherwise only part of the screen would show).
 - **Multiple monitors:** only the **primary monitor** is captured for now.
 
+## Troubleshooting
+
+### Black screen in the viewer
+
+The agent now handles the common causes automatically:
+
+- **Wrong session** — the agent used to start in the physical console session. If the user works over
+  RDP / a VM enhanced session, that session is empty and the screen was black. The service now picks
+  the session where the user is actually logged in.
+- **Display asleep** — while a viewer is connected the agent keeps the display on, and wakes it with a
+  1-pixel mouse nudge if the picture is black.
+- **GDI returns black frames** (some Windows 11 GPU drivers, hybrid graphics) — after 3 fully black
+  frames the agent switches to **DXGI Desktop Duplication** automatically.
+
+Diagnostics: `C:\ProgramData\DXDesk\agent.log` shows the session id, the capture method and any
+fallback. `DXDesk.Host.exe capturetest` checks capture on a machine; set `DXDESK_CAPTURE=dxgi` to
+force DXGI.
+
+### Certificate / "Windows protected your PC" on Windows 11
+
+Windows 11 blocks unsigned executables copied from a network share (SmartScreen, Smart App Control,
+AppLocker). Sign every release:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\sign.ps1                # uses the DXDesk/SRXDesk code-signing cert
+powershell -ExecutionPolicy Bypass -File deploy\sign.ps1 -NewSelfSigned # or create "CN=DXDesk Code Signing"
+```
+
+It signs all exes in `deploy/admin` and `deploy/service-package` (SHA256 + timestamp) and exports
+`DXDesk-signing.cer`. With a self-signed or internal (AD CS) certificate, every PC must trust it:
+deploy the `.cer` via GPO to **Trusted Root Certification Authorities** and **Trusted Publishers**,
+or leave it next to `install-service.bat`, which imports it. The installer also removes the
+"downloaded from the internet" mark from the copied files. A commercial or Azure Trusted Signing
+certificate needs no distribution and is the only option that satisfies Smart App Control.
+
 ## Security
 
 | What | How |

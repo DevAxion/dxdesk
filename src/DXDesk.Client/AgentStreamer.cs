@@ -22,6 +22,11 @@ public static class AgentStreamer
 {
     public static void Run(int port, int targetFps, int tileSize, TimeSpan noConnectTimeout, string sessionToken, Action<string> log)
     {
+        // Ekran tutma diaqnostikası agent loquna getsin; ekran qara olanda onu oyat.
+        ScreenCapturer.Log = log;
+        ScreenCapturer.BlackScreenDetected = DisplayWake.Nudge;
+        log($"Sistem: {Environment.OSVersion.VersionString}, sessiya={System.Diagnostics.Process.GetCurrentProcess().SessionId}");
+
         var listener = new TcpListener(IPAddress.Any, port);
         listener.Start();
         log($"Agent {port} portunda gözləyir (SYSTEM, masaüstü-izləmə).");
@@ -58,6 +63,7 @@ public static class AgentStreamer
             }
 
             using (client)
+            using (DisplayWake.KeepOn(log))
             {
                 client.NoDelay = true;
                 var stream = client.GetStream();

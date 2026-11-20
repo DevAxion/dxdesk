@@ -22,6 +22,9 @@ switch (mode)
     case "relaytest":
         await RelayTestAsync(args.Length > 1 ? args[1] : "http://localhost:5100/remotehub", cts.Token);
         break;
+    case "capturetest":
+        CaptureTest();
+        break;
     case "authtest":
         await AuthTestAsync(cts.Token);
         break;
@@ -251,4 +254,21 @@ static async Task AuthTestAsync(CancellationToken ct)
     var ok = wrong == 0 && right > 0;
     Log(ok ? "AUTHTEST: OK" : "AUTHTEST: XƏTA");
     Environment.ExitCode = ok ? 0 : 1;
+}
+
+static void CaptureTest()
+{
+    // Hər iki üsulla ekran tutub nəticəni göstərir (qara ekran diaqnostikası).
+    ScreenCapturer.Log = Log;
+    using var cap = new ScreenCapturer();
+    for (var i = 0; i < 5; i++) { cap.CaptureBitmap(); Thread.Sleep(100); }
+    var bmp = cap.CaptureBitmap();
+    long sum = 0;
+    for (var y = 0; y < bmp.Height; y += 37)
+    for (var x = 0; x < bmp.Width; x += 37)
+    {
+        var c = bmp.GetPixel(x, y);
+        sum += c.R + c.G + c.B;
+    }
+    Log($"CAPTURETEST: üsul={cap.Method}, ölçü={bmp.Width}x{bmp.Height}, parlaqlıq={sum}");
 }

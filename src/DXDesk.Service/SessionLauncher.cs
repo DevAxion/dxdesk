@@ -21,10 +21,10 @@ internal static class SessionLauncher
     /// </summary>
     public static bool LaunchInActiveSession(string application, string arguments, Action<string> log)
     {
-        var sessionId = WTSGetActiveConsoleSessionId();
+        var sessionId = FindUserSessionId(log);
         if (sessionId == 0xFFFFFFFF)
         {
-            log("Aktiv konsol sessiyası yoxdur (heç kim daxil olmayıb).");
+            log("Aktiv istifadəçi sessiyası yoxdur (heç kim daxil olmayıb).");
             return false;
         }
 
@@ -98,6 +98,91 @@ internal static class SessionLauncher
             CloseHandle(processToken);
         }
     }
+
+    /// <summary>
+    /// İstifadəçinin HƏQİQƏTƏN işlədiyi sessiyanı tapır.
+    /// WTSGetActiveConsoleSessionId yalnız fiziki konsolu qaytarır: istifadəçi RDP ilə
+    /// (və ya VM-də enhanced session ilə) işləyəndə konsol sessiyası boş/kilidli olur və
+    /// agent orada açılsa ekran QARA görünür. Ona görə:
+    ///   1) WTSActive vəziyyətində, istifadəçisi olan sessiyalar arasında konsolu üstün tut;
+    ///   2) konsol aktiv deyilsə, ilk aktiv RDP sessiyasını götür;
+    ///   3) heç nə yoxdursa, köhnə üsula (konsol) qayıt.
+    /// </summary>
+    private static uint FindUserSessionId(Action<string> log)
+    {
+        var console = WTSGetActiveConsoleSessionId();
+        uint? firstActive = null;
+        var consoleActive = false;
+
+        if (WTSEnumerateSessions(IntPtr.Zero, 0, 1, out var pSessions, out var count))
+        {
+            try
+            {
+                var size = Marshal.SizeOf<WTS_SESSION_INFO>();
+                for (var i = 0; i < count; i++)
+                {
+                    var info = Marshal.PtrToStructure<WTS_SESSION_INFO>(pSessions + i * size);
+                    if (info.State != WTS_CONNECTSTATE_CLASS.WTSActive || info.SessionID == 0)
+                    {
+                        continue;
+                    }
+                    if (!HasUser(info.SessionID))
+                    {
+                        continue;
+                    }
+                    log($"Aktiv sessiya: id={info.SessionID}, ad={info.pWinStationName}");
+                    if (info.SessionID == console) consoleActive = true;
+                    firstActive ??= info.SessionID;
+                }
+            }
+            finally
+            {
+                WTSFreeMemory(pSessions);
+            }
+        }
+
+        if (consoleActive) return console;
+        if (firstActive is { } rdp)
+        {
+            log($"Konsol sessiyası ({console}) aktiv deyil — istifadəçinin sessiyası seçildi: {rdp}");
+            return rdp;
+        }
+        return console;
+    }
+
+    private static bool HasUser(uint sessionId)
+    {
+        if (!WTSQueryUserToken(sessionId, out var token))
+        {
+            return false;
+        }
+        CloseHandle(token);
+        return true;
+    }
+
+    private enum WTS_CONNECTSTATE_CLASS
+    {
+        WTSActive, WTSConnected, WTSConnectQuery, WTSShadow, WTSDisconnected,
+        WTSIdle, WTSListen, WTSReset, WTSDown, WTSInit,
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WTS_SESSION_INFO
+    {
+        public uint SessionID;
+        [MarshalAs(UnmanagedType.LPWStr)] public string pWinStationName;
+        public WTS_CONNECTSTATE_CLASS State;
+    }
+
+    [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "WTSEnumerateSessionsW")]
+    private static extern bool WTSEnumerateSessions(IntPtr hServer, int reserved, int version,
+        out IntPtr ppSessionInfo, out int pCount);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr pMemory);
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSQueryUserToken(uint sessionId, out IntPtr phToken);
 
     // ---- Sabitlər ----
     private const uint MAXIMUM_ALLOWED = 0x02000000;

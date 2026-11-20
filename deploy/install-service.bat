@@ -35,6 +35,17 @@ REM --- Fayllari kopyala ---
 robocopy "%SRC%" "%DEST%" DXDesk.Service.exe DXDesk.Client.exe appsettings.json /R:2 /W:3>> "%LOG%" 2>&1
 echo robocopy exit=%ERRORLEVEL%>> "%LOG%"
 
+REM --- Windows 11: sebekeden kopyalanan fayllardan "internetden gelib" isaresini sil ---
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%DEST%' -File | Unblock-File">> "%LOG%" 2>&1
+
+REM --- Imza sertifikati (sign.ps1 yaradir): yanindadirsa etibarli siyahilara elave et ---
+REM     (GPO ile yayirsinizsa bu addim lazim deyil)
+if exist "%SRC%\DXDesk-signing.cer" (
+  certutil -f -addstore Root "%SRC%\DXDesk-signing.cer">> "%LOG%" 2>&1
+  certutil -f -addstore TrustedPublisher "%SRC%\DXDesk-signing.cer">> "%LOG%" 2>&1
+  echo imza sertifikati elave edildi>> "%LOG%"
+)
+
 if not exist "%DEST%\DXDesk.Service.exe" (
   echo XETA: xidmet exe kopyalanmadi. Bax: %LOG%
   goto :end
