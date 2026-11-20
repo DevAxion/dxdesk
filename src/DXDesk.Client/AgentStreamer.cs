@@ -20,7 +20,7 @@ namespace DXDesk.Client;
 [SupportedOSPlatform("windows")]
 public static class AgentStreamer
 {
-    public static void Run(int port, int targetFps, int tileSize, TimeSpan noConnectTimeout, string sessionToken, Action<string> log)
+    public static void Run(int port, int targetFps, int tileSize, TimeSpan noConnectTimeout, string sessionToken, Uri? relayStreamUrl, Action<string> log)
     {
         // Ekran tutma diaqnostikası agent loquna getsin; ekran qara olanda onu oyat.
         ScreenCapturer.Log = log;
@@ -33,40 +33,19 @@ public static class AgentStreamer
 
         try
         {
-            // Yalnız düzgün sessiya açarını göndərən viewer qəbul olunur.
-            // Yanlış cəhdlər bağlanır, vaxt bitənə qədər (max 5 cəhd) gözləməyə davam edilir.
-            var deadline = DateTime.UtcNow + noConnectTimeout;
-            TcpClient? client = null;
-            for (var attempt = 0; attempt < 5 && client is null; attempt++)
-            {
-                var left = deadline - DateTime.UtcNow;
-                if (left <= TimeSpan.Zero || !WaitForClient(listener, left, out var candidate) || candidate is null)
-                {
-                    break;
-                }
-
-                if (SessionAuth.Verify(candidate.GetStream(), sessionToken))
-                {
-                    client = candidate;
-                }
-                else
-                {
-                    log($"Yanlış sessiya açarı, rədd edildi: {candidate.Client.RemoteEndPoint}");
-                    candidate.Dispose();
-                }
-            }
-
-            if (client is null)
+            // Viewer iki yoldan biri ilə gələ bilər (hansı əvvəl düzgün açarla gəlsə, o qalır):
+            //   1) birbaşa TCP (LAN, port açıqdırsa) — ən sürətli;
+            //   2) relay üzərindən WebSocket (NAT/VPN/firewall arxasında).
+            var stream = AcceptViewer(listener, sessionToken, relayStreamUrl, noConnectTimeout, log);
+            if (stream is null)
             {
                 log("Düzgün açarlı viewer vaxtında qoşulmadı — agent dayanır.");
                 return;
             }
 
-            using (client)
+            using (stream)
             using (DisplayWake.KeepOn(log))
             {
-                client.NoDelay = true;
-                var stream = client.GetStream();
                 var stop = new CancellationTokenSource();
                 var clip = new ClipSync(log);
 
@@ -95,7 +74,7 @@ public static class AgentStreamer
                     }
                 }
 
-                try { client.Close(); } catch { }
+                try { stream.Close(); } catch { }
                 input.Join(1000);
             }
         }
@@ -103,6 +82,119 @@ public static class AgentStreamer
         {
             listener.Stop();
             log("Agent sessiyası bitdi.");
+        }
+    }
+
+    /// <summary>
+    /// Birbaşa TCP və relay yolunu PARALEL gözləyir; düzgün sessiya açarını ilk göndərən
+    /// viewer-in axınını qaytarır (digər yol bağlanır). Vaxt bitsə null.
+    /// </summary>
+    private static Stream? AcceptViewer(TcpListener listener, string token, Uri? relayUrl, TimeSpan timeout, Action<string> log)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        Stream? winner = null;
+        var gate = new object();
+        var done = new ManualResetEventSlim(false);
+        using var cancel = new CancellationTokenSource();
+
+        bool Offer(Stream s, string via)
+        {
+            lock (gate)
+            {
+                if (winner is not null) return false;
+                winner = s;
+            }
+            log($"Viewer qoşuldu: {via}");
+            done.Set();
+            return true;
+        }
+
+        // 1) Birbaşa TCP
+        var direct = new Thread(() =>
+        {
+            for (var attempt = 0; attempt < 5 && !cancel.IsCancellationRequested; attempt++)
+            {
+                var left = deadline - DateTime.UtcNow;
+                if (left <= TimeSpan.Zero || !WaitForClient(listener, left, out var candidate) || candidate is null)
+                {
+                    return;
+                }
+
+                var ns = candidate.GetStream();
+                if (SessionAuth.Verify(ns, token))
+                {
+                    candidate.NoDelay = true;
+                    if (!Offer(new TcpOwnedStream(candidate), $"birbaşa {candidate.Client.RemoteEndPoint}"))
+                    {
+                        candidate.Dispose();
+                    }
+                    return;
+                }
+
+                log($"Yanlış sessiya açarı, rədd edildi: {candidate.Client.RemoteEndPoint}");
+                candidate.Dispose();
+            }
+        })
+        { IsBackground = true, Name = "agent-accept-direct" };
+        direct.Start();
+
+        // 2) Relay üzərindən
+        if (relayUrl is not null)
+        {
+            _ = Task.Run(async () =>
+            {
+                RelayStream? rs = null;
+                try
+                {
+                    rs = await RelayStream.ConnectAsync(relayUrl, "agent", token, cancel.Token);
+                    log($"Relay axınına qoşuldu, viewer gözlənilir: {relayUrl}");
+                    var left = deadline - DateTime.UtcNow;
+                    if (left > TimeSpan.Zero && await SessionAuth.VerifyAsync(rs, token, cancel.Token, left) && Offer(rs, "relay üzərindən"))
+                    {
+                        rs = null; // sahibi artıq çağırandır
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    log($"Relay axını alınmadı: {ex.Message}");
+                }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    rs?.Dispose();
+                }
+            });
+        }
+
+        var wait = deadline - DateTime.UtcNow;
+        if (wait > TimeSpan.Zero) done.Wait(wait);
+        cancel.Cancel();
+        lock (gate)
+        {
+            return winner;
+        }
+    }
+
+    /// <summary>NetworkStream + onun TcpClient-i: dispose olunanda socket də bağlanır.</summary>
+    private sealed class TcpOwnedStream : Stream
+    {
+        private readonly TcpClient _client;
+        private readonly NetworkStream _inner;
+        public TcpOwnedStream(TcpClient client) { _client = client; _inner = client.GetStream(); }
+        public override bool CanRead => true;
+        public override bool CanWrite => true;
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
+        public override void Flush() => _inner.Flush();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _inner.Dispose(); _client.Dispose(); }
+            base.Dispose(disposing);
         }
     }
 
@@ -124,7 +216,7 @@ public static class AgentStreamer
     /// ləğv edir.
     /// </summary>
     private static void CaptureOnCurrentDesktop(
-        NetworkStream stream, int targetFps, int tileSize, CancellationTokenSource stop, ClipSync clip, Action<string> log)
+        Stream stream, int targetFps, int tileSize, CancellationTokenSource stop, ClipSync clip, Action<string> log)
     {
         // Təzə thread-in İLK addımı: aktiv masaüstünə keç (GDI-dən əvvəl).
         var desktop = DesktopControl.AttachToInputDesktop();
@@ -194,7 +286,7 @@ public static class AgentStreamer
         }
     }
 
-    private static void InputLoop(NetworkStream stream, CancellationTokenSource stop, ClipSync clip, Action<string> log)
+    private static void InputLoop(Stream stream, CancellationTokenSource stop, ClipSync clip, Action<string> log)
     {
         string? attached = DesktopControl.AttachToInputDesktop();
         log($"input: attach='{attached ?? "(alınmadı)"}'");

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using DXDesk.Client;
+using DXDesk.Core;
 
 // Miqyaslanmış ekranlarda tam çözünürlük üçün ƏN BAŞDA DPI-aware et.
 DXDesk.Client.NativeMethods.EnableDpiAwareness();
@@ -53,7 +54,7 @@ if (args.Length >= 5 && args[0].Equals("--agent", StringComparison.OrdinalIgnore
     {
         var agentThread = new Thread(() =>
         {
-            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(30), agentToken, AgentLog); }
+            try { AgentStreamer.Run(agentPort, streamFps, tileSize, TimeSpan.FromSeconds(45), agentToken, RelayStream.StreamUrlFromHub(agentRelay), AgentLog); }
             finally { done.Set(); }
         })
         {

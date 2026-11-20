@@ -41,7 +41,7 @@ connection.On<ConnectionResponseMessage>("ConnectionResponse", response =>
         var target = !string.IsNullOrWhiteSpace(response.IpAddress) ? response.IpAddress! : response.Hostname;
         var port = response.StreamPort > 0 ? response.StreamPort : fallbackPort;
         Console.WriteLine($"  ✓ {response.Hostname} qəbul etdi. Ekran açılır ({target}:{port})...");
-        ViewerHost.Launch(target, port, response.SessionToken);
+        ViewerHost.Launch(target, port, response.SessionToken, DXDesk.Core.RelayStream.StreamUrlFromHub(relayUrl));
     }
     else
     {

@@ -25,6 +25,9 @@ switch (mode)
     case "capturetest":
         CaptureTest();
         break;
+    case "relaystreamtest":
+        await RelayStreamTestAsync(args.Length > 1 ? args[1] : "http://localhost:5100/remotehub", cts.Token);
+        break;
     case "authtest":
         await AuthTestAsync(cts.Token);
         break;
@@ -271,4 +274,72 @@ static void CaptureTest()
         sum += c.R + c.G + c.B;
     }
     Log($"CAPTURETEST: üsul={cap.Method}, ölçü={bmp.Width}x{bmp.Height}, parlaqlıq={sum}");
+}
+
+static async Task RelayStreamTestAsync(string relayUrl, CancellationToken ct)
+{
+    // Relay üzərindən ekran axını: admin sorğu göndərir, "agent" açarla relay-ə qoşulur,
+    // viewer relay üzərindən kadrları alır. Yanlış açar rədd edilməlidir.
+    var admin = new HubConnectionBuilder().WithUrl(relayUrl).Build();
+    var client = new HubConnectionBuilder().WithUrl(relayUrl).Build();
+    var adminSecret = Environment.GetEnvironmentVariable("DXDESK_ADMIN_SECRET") ?? "";
+    var clientSecret = Environment.GetEnvironmentVariable("DXDESK_CLIENT_SECRET") ?? "";
+    var streamUrl = RelayStream.StreamUrlFromHub(relayUrl);
+    var tokenTcs = new TaskCompletionSource<string>();
+    client.On<string, string>("ConnectionRequest", (_, t) => tokenTcs.TrySetResult(t));
+
+    await client.StartAsync(ct);
+    await client.InvokeAsync("RegisterClient", "STREAMTEST-PC", clientSecret, ct);
+    await admin.StartAsync(ct);
+    await admin.InvokeAsync("RegisterAdmin", adminSecret, ct);
+    await admin.InvokeAsync<System.Text.Json.JsonElement>("RequestConnection", adminSecret, "STREAMTEST-PC", ct);
+    var token = await tokenTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
+
+    // Yanlış açar relay tərəfindən rədd edilməlidir.
+    var wrongRejected = false;
+    try { using var bad = await RelayStream.ConnectAsync(streamUrl, "viewer", SessionAuth.NewToken(), ct); }
+    catch { wrongRejected = true; }
+
+    // "Agent": relay-ə qoşulub viewer-in açarını yoxlayır, sonra kadr göndərir.
+    var agentTask = Task.Run(async () =>
+    {
+        using var rs = await RelayStream.ConnectAsync(streamUrl, "agent", token, ct);
+        if (!await SessionAuth.VerifyAsync(rs, token, ct, TimeSpan.FromSeconds(30))) return "açar yanlış";
+        using var enc = new TileScreenEncoder();
+        for (var i = 0; i < 10; i++)
+        {
+            var f = enc.NextFrame();
+            if (f is not null) await FrameProtocol.WriteFrameAsync(rs, f, ct);
+            await Task.Delay(100, ct);
+        }
+        return "ok";
+    }, ct);
+
+    await Task.Delay(500, ct);
+    using var receiver = new ScreenStreamReceiver();
+    await receiver.ConnectRelayAsync(streamUrl, token, ct);
+    var frames = 0;
+    long bytes = 0;
+    using var decoder = new TileFrameDecoder();
+    var size = "";
+    using var recvCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    recvCts.CancelAfter(TimeSpan.FromSeconds(5));
+    try
+    {
+        await receiver.ReceiveLoopAsync(p =>
+        {
+            frames++; bytes += p.Length;
+            var c = decoder.Apply(p);
+            if (c is not null) size = $"{c.Width}x{c.Height}";
+        }, recvCts.Token);
+    }
+    catch (OperationCanceledException) { }
+
+    var agent = await agentTask;
+    Log($"Relay axını: via={receiver.Via}, {frames} kadr, {bytes / 1024} KB, ekran {size}, agent={agent}, yanlış açar rədd={wrongRejected}");
+    var ok = frames > 0 && agent == "ok" && wrongRejected && size != "";
+    Log(ok ? "RELAYSTREAMTEST: OK" : "RELAYSTREAMTEST: XƏTA");
+    Environment.ExitCode = ok ? 0 : 1;
+    await admin.DisposeAsync();
+    await client.DisposeAsync();
 }

@@ -50,6 +50,13 @@ public sealed class ClientRegistry
     private readonly ConcurrentDictionary<string, PendingRequest> _pendingRequests =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>sessiya açarı -> (hostname, yaradılma vaxtı): relay axını üçün.</summary>
+    private readonly ConcurrentDictionary<string, (string Host, DateTimeOffset Created)> _streamTokens =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Relay axını üçün açarın cütləşməyə qədər etibarlı olduğu müddət.</summary>
+    public static readonly TimeSpan StreamTokenLifetime = TimeSpan.FromMinutes(3);
+
     /// <summary>Sorğu bu müddətdən sonra etibarsızdır.</summary>
     public static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(2);
 
@@ -123,8 +130,33 @@ public sealed class ClientRegistry
 
     public bool IsAdmin(string connectionId) => _admins.ContainsKey(connectionId);
 
-    public void SetPendingRequest(string hostname, string adminConnectionId, string token) =>
+    public void SetPendingRequest(string hostname, string adminConnectionId, string token)
+    {
         _pendingRequests[hostname] = new PendingRequest(adminConnectionId, token, DateTimeOffset.UtcNow);
+        _streamTokens[token] = (hostname, DateTimeOffset.UtcNow);
+
+        // Köhnəlmiş axın açarlarını təmizlə.
+        foreach (var (key, value) in _streamTokens)
+        {
+            if (DateTimeOffset.UtcNow - value.Created > StreamTokenLifetime)
+            {
+                _streamTokens.TryRemove(key, out _);
+            }
+        }
+    }
+
+    /// <summary>Açar relay axını üçün etibarlıdırsa, aid olduğu hostname-i qaytarır.</summary>
+    public string? GetStreamTokenHost(string? token)
+    {
+        if (string.IsNullOrEmpty(token) || !_streamTokens.TryGetValue(token, out var entry))
+        {
+            return null;
+        }
+        return DateTimeOffset.UtcNow - entry.Created <= StreamTokenLifetime ? entry.Host : null;
+    }
+
+    /// <summary>Agent və viewer cütləşəndən sonra açar bir daha istifadə oluna bilməz.</summary>
+    public void ConsumeStreamToken(string token) => _streamTokens.TryRemove(token, out _);
 
     /// <summary>
     /// Gözləyən sorğunu YALNIZ açar uyğun gəlirsə və vaxtı keçməyibsə götürür.

@@ -25,12 +25,11 @@ public static class SessionAuth
         FrameProtocol.WriteFrameAsync(stream, BuildHello(token), ct);
 
     /// <summary>Agent tərəfi (sinxron): ilk kadrı oxuyub açarı yoxlayır.</summary>
-    public static bool Verify(Stream stream, string expectedToken)
+    public static bool Verify(Stream stream, string expectedToken, TimeSpan? timeout = null)
     {
-        using var cts = new CancellationTokenSource(HandshakeTimeout);
         try
         {
-            return VerifyAsync(stream, expectedToken, cts.Token).GetAwaiter().GetResult();
+            return VerifyAsync(stream, expectedToken, default, timeout).GetAwaiter().GetResult();
         }
         catch
         {
@@ -39,14 +38,14 @@ public static class SessionAuth
     }
 
     /// <summary>Agent tərəfi: ilk kadrı <see cref="HandshakeTimeout"/> ərzində oxuyub yoxlayır.</summary>
-    public static async Task<bool> VerifyAsync(Stream stream, string expectedToken, CancellationToken ct = default)
+    public static async Task<bool> VerifyAsync(Stream stream, string expectedToken, CancellationToken ct = default, TimeSpan? timeout = null)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(HandshakeTimeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(timeout ?? HandshakeTimeout);
         byte[]? hello;
         try
         {
-            hello = await FrameProtocol.ReadFrameAsync(stream, timeout.Token, maxBytes: 256);
+            hello = await FrameProtocol.ReadFrameAsync(stream, cts.Token, maxBytes: 256);
         }
         catch
         {

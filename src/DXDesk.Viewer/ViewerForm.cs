@@ -43,7 +43,12 @@ public sealed class ViewerForm : Form
         };
 
         _infoLabel = new ToolStripStatusLabel("Gözlənilir...");
-        _status = new StatusStrip();
+        // Forma qara olduğu üçün status zolağı da qara görünürdü və mətn oxunmurdu.
+        _status = new StatusStrip
+        {
+            BackColor = SystemColors.Control,
+            ForeColor = SystemColors.ControlText,
+        };
         _status.Items.Add(_infoLabel);
 
         Controls.Add(_picture);

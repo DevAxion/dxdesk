@@ -35,16 +35,19 @@ DXDesk shares the user's **real (attended) session**.
 ## Architecture
 
 - **Signaling / discovery / consent** → SignalR relay (`/remotehub`).
-- **Media (screen + input)** → **direct TCP** between Client and Viewer (currently LAN only).
-  Frame protocol: `[4-byte length][payload]`. Input travels back over the same connection.
+- **Media (screen + input)** → two paths, tried in parallel:
+  1. **direct TCP** to the agent's port 7000 (fastest, works on the LAN);
+  2. **through the relay** (`/stream`, WebSocket) — both the agent and the viewer connect *out* to the
+     relay, so it works behind NAT, VPN, VMs and firewalls without opening any port on the PC.
+  The viewer tries direct for 3 seconds, then falls back to the relay. Frame protocol:
+  `[4-byte length][payload]`; input travels back over the same connection.
 - When the user clicks **Yes**, the agent starts a screen server bound to that session:
   it accepts only the viewer holding the one-time session token, and stops automatically
   when the viewer disconnects or nobody connects within 30 seconds.
 - The agent runs as **SYSTEM** and follows desktop switches (Default ↔ Secure/Winlogon),
   so UAC prompts are visible and can be answered remotely.
 
-> Tunneling media through the relay for **remote / NAT-ed** machines, plus encryption,
-> is planned for **Phase 6**. The current version is meant for the **LAN**.
+> Relay traffic is not encrypted yet (no TLS) — see [Security](#security).
 
 ---
 
@@ -134,8 +137,10 @@ DXDesk.Host.exe serve 7000
 DXDesk.Host.exe selftest    # network streaming + tile decode
 DXDesk.Host.exe authtest    # session token: wrong/no token gets 0 frames, correct token gets frames
 DXDesk.Host.exe inputtest   # input protocol
-DXDesk.Host.exe relaytest   # relay signaling flow (relay must be running;
-                            # set DXDESK_ADMIN_SECRET / DXDESK_CLIENT_SECRET env vars)
+DXDesk.Host.exe relaytest        # relay signaling flow (relay must be running;
+                                 # set DXDESK_ADMIN_SECRET / DXDESK_CLIENT_SECRET env vars)
+DXDesk.Host.exe relaystreamtest  # screen stream through the relay (same env vars)
+DXDesk.Host.exe capturetest      # screen capture method + brightness check
 ```
 
 ## Running the relay on Ubuntu with Docker
@@ -167,10 +172,9 @@ hostname -I
 Then set `Relay:Url` in the **admin** and **client** `appsettings.json` files to the
 Ubuntu server's IP, e.g. `http://192.168.0.50:5100/remotehub`.
 
-> **Network note:** the relay only handles signaling. Media (screen + input) still goes
-> **directly from admin to client**, so the admin, all clients and the relay must be on
-> a **mutually reachable network** (same LAN). The relay forwards the client IP it sees
-> to the admin, so there must be no NAT between them.
+> **Network note:** when the admin can't reach a PC directly (NAT, VPN, VM, firewall), the screen
+> goes **through the relay**, so the relay's bandwidth matters: roughly 50–500 KB/s per active
+> session. Only port **5100** on the relay has to be reachable from everyone.
 
 ## Bandwidth optimization (tile diffing)
 
@@ -193,7 +197,11 @@ Configuration (Client `appsettings.json` → `Stream`): `Port`, `TargetFps`, `Ti
 
 ### Black screen in the viewer
 
-The agent now handles the common causes automatically:
+First check the status bar at the bottom of the viewer — it shows whether the connection is
+direct or via the relay, and any error. If `agent.log` says *"no viewer with a valid key connected
+in time"*, the viewer never reached the PC: update the relay so the relay path is available.
+
+The agent also handles the common capture problems automatically:
 
 - **Wrong session** — the agent used to start in the physical console session. If the user works over
   RDP / a VM enhanced session, that session is empty and the screen was black. The service now picks
@@ -239,7 +247,6 @@ certificate needs no distribution and is the only option that satisfies Smart Ap
 Not done yet:
 
 - ⏳ **Encryption (TLS):** relay traffic and the media stream are not encrypted yet — add TLS before any use over the internet.
-- ⏳ **NAT / remote access:** tunnel media through the relay for computers on other networks.
 
 **Upgrade rule:** the protocol has changed — update Relay, Service, Client and Server **at the same time**.
 

@@ -13,7 +13,7 @@ public static class ViewerSession
     private static bool _initialized;
 
     /// <summary>Verilmiş host:port-a qoşulub uzaq ekranı göstərir (bloklayır).</summary>
-    public static void RunRemote(string host, int port, string? sessionToken = null)
+    public static void RunRemote(string host, int port, string? sessionToken = null, Uri? relayStreamUrl = null)
     {
         if (!_initialized)
         {
@@ -45,8 +45,9 @@ public static class ViewerSession
                 try
                 {
                     using var receiver = new ScreenStreamReceiver();
-                    await receiver.ConnectAsync(host, port, cts.Token, sessionToken);
+                    await ConnectAsync(receiver, host, port, sessionToken, relayStreamUrl, form, cts.Token);
                     active = receiver;
+                    form.ShowStatus($"Qoşuldu ({receiver.Via}). İlk kadr gözlənilir...");
                     using var decoder = new TileFrameDecoder();
                     await receiver.ReceiveLoopAsync(payload =>
                     {
@@ -86,5 +87,28 @@ public static class ViewerSession
 
         form.FormClosing += (_, _) => cts.Cancel();
         Application.Run(form);
+    }
+
+    /// <summary>
+    /// Əvvəlcə birbaşa TCP (3 s), alınmasa relay üzərindən qoşulur.
+    /// Birbaşa yol LAN-da daha sürətlidir; relay NAT/VPN/firewall arxasında işləyir.
+    /// </summary>
+    private static async Task ConnectAsync(
+        ScreenStreamReceiver receiver, string host, int port, string? token, Uri? relay, ViewerForm form, CancellationToken ct)
+    {
+        form.ShowStatus($"Birbaşa qoşulur: {host}:{port}...");
+        try
+        {
+            using var direct = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            direct.CancelAfter(TimeSpan.FromSeconds(3));
+            await receiver.ConnectAsync(host, port, direct.Token, token);
+            return;
+        }
+        catch (Exception ex) when (relay is not null && !string.IsNullOrEmpty(token) && !ct.IsCancellationRequested)
+        {
+            form.ShowStatus($"Birbaşa alınmadı ({ex.Message}). Relay üzərindən qoşulur...");
+        }
+
+        await receiver.ConnectRelayAsync(relay!, token!, ct);
     }
 }
